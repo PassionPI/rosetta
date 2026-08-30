@@ -1,0 +1,12 @@
+{
+  "name": "rossetta",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:server": "pnpm --filter @rossetta/server dev",
+    "dev:web": "pnpm --filter @rossetta/web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "db:generate": "pnpm --filter @rossetta/server db:generate"
+  }
+}
