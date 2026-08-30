@@ -1,4 +1,4 @@
-# rossetta
+# rosetta
 
 基于 [pi agent](https://pi.dev) 的 Web harness。设计文档见 [md/](md/README.md)。
 

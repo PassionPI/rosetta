@@ -1,5 +1,5 @@
-import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { api } from "../api/client.ts";
 
 export default function Login() {
@@ -26,7 +26,7 @@ export default function Login() {
   return (
     <div className="center">
       <form className="card login" onSubmit={submit}>
-        <h2>rossetta</h2>
+        <h2>rosetta</h2>
         <input
           type="password"
           placeholder="密码（HARNESS_PASSWORD）"
@@ -35,7 +35,9 @@ export default function Login() {
           autoFocus
         />
         {error && <div className="error">{error}</div>}
-        <button disabled={busy || !password}>{busy ? "登录中…" : "登录"}</button>
+        <button disabled={busy || !password}>
+          {busy ? "登录中…" : "登录"}
+        </button>
       </form>
     </div>
   );

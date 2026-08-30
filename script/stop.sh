@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# 优雅停止 rossetta server（SIGTERM → 等待 → SIGKILL 兜底）
+# 优雅停止 rosetta server（SIGTERM → 等待 → SIGKILL 兜底）
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PID_FILE="$ROOT/data/harness.pid"
 
-if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet rossetta 2>/dev/null; then
-  echo "由 systemd 托管，请使用: sudo systemctl stop rossetta"
+if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet rosetta 2>/dev/null; then
+  echo "由 systemd 托管，请使用: sudo systemctl stop rosetta"
   exit 0
 fi
 

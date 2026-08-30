@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { EntryDTO, SessionSummary } from "@rossetta/shared";
+import type { EntryDTO, SessionSummary } from "@rosetta/shared";
 import { api } from "../api/client.ts";
 import { wsClient } from "../ws/client.ts";
 

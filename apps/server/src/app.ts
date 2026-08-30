@@ -1,14 +1,14 @@
-import fs from "node:fs";
-import Fastify, { type FastifyInstance } from "fastify";
 import cookie from "@fastify/cookie";
-import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
-import type { WsClientMessage } from "@rossetta/shared";
-import { config, webDistDir } from "./config.ts";
+import websocket from "@fastify/websocket";
+import type { WsClientMessage } from "@rosetta/shared";
+import Fastify, { type FastifyInstance } from "fastify";
+import fs from "node:fs";
 import { isAuthed } from "./auth/cookie.ts";
-import { wsHub } from "./ws/hub.ts";
+import { webDistDir } from "./config.ts";
 import { coreRoutes } from "./routes/core.ts";
 import { orchestratorRoutes } from "./routes/orchestrator.ts";
+import { wsHub } from "./ws/hub.ts";
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({ bodyLimit: 64 * 1024 * 1024, logger: false });
@@ -18,7 +18,11 @@ export async function buildApp(): Promise<FastifyInstance> {
   // 鉴权（md/04 §1）：/api/* 除 login 外全部校验
   app.addHook("onRequest", async (req, reply) => {
     const url = req.url.split("?")[0];
-    if (url.startsWith("/api") && url !== "/api/auth/login" && !isAuthed(req.headers.cookie)) {
+    if (
+      url.startsWith("/api") &&
+      url !== "/api/auth/login" &&
+      !isAuthed(req.headers.cookie)
+    ) {
       await reply.code(401).send({ error: "unauthorized" });
     }
   });
@@ -34,8 +38,10 @@ export async function buildApp(): Promise<FastifyInstance> {
       try {
         const msg = JSON.parse(String(raw)) as WsClientMessage;
         if (msg.type === "subscribe") wsHub.subscribe(client, msg.sessionId);
-        else if (msg.type === "unsubscribe") wsHub.unsubscribe(client, msg.sessionId);
-        else if (msg.type === "ping") socket.send(JSON.stringify({ kind: "pong" }));
+        else if (msg.type === "unsubscribe")
+          wsHub.unsubscribe(client, msg.sessionId);
+        else if (msg.type === "ping")
+          socket.send(JSON.stringify({ kind: "pong" }));
       } catch {
         /* 忽略非法消息 */
       }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 启动 rossetta server（手动模式；开机自启请用 install-systemd.sh）
+# 启动 rosetta server（手动模式；开机自启请用 install-systemd.sh）
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -17,8 +17,8 @@ if [ -z "${HARNESS_PASSWORD:-}" ]; then
 fi
 
 # systemd 托管时交给 systemd
-if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet rossetta 2>/dev/null; then
-  echo "rossetta 已由 systemd 托管：systemctl status rossetta"
+if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet rosetta 2>/dev/null; then
+  echo "rosetta 已由 systemd 托管：systemctl status rosetta"
   exit 0
 fi
 
@@ -30,7 +30,7 @@ rm -f "$PID_FILE"
 
 if [ ! -f "$ROOT/apps/server/dist/index.js" ]; then
   echo "dist 不存在，先构建…"
-  pnpm --filter @rossetta/server build
+  pnpm --filter @rosetta/server build
 fi
 
 mkdir -p "$ROOT/data"

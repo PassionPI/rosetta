@@ -1,5 +1,5 @@
+import type { RepoDTO, TaskDTO, WorktreeDTO } from "@rosetta/shared";
 import { asc, eq, inArray } from "drizzle-orm";
-import type { RepoDTO, TaskDTO, WorktreeDTO } from "@rossetta/shared";
 import { db } from "../db/index.ts";
 import { repos, taskDeps, tasks, worktrees } from "../db/schema.ts";
 
@@ -10,7 +10,12 @@ export function getTaskRow(taskId: number): TaskRow | undefined {
 }
 
 export function depsOf(taskId: number): number[] {
-  return db.select().from(taskDeps).where(eq(taskDeps.taskId, taskId)).all().map((d) => d.dependsOn);
+  return db
+    .select()
+    .from(taskDeps)
+    .where(eq(taskDeps.taskId, taskId))
+    .all()
+    .map((d) => d.dependsOn);
 }
 
 export function taskRowToDTO(row: TaskRow): TaskDTO {
@@ -60,7 +65,9 @@ export function listReposWithWorktrees(): RepoDTO[] {
     .from(tasks)
     .where(inArray(tasks.status, SLOT_HOLDING_STATUSES))
     .all();
-  const taskByPath = new Map(holding.filter((h) => h.path).map((h) => [h.path!, h.id]));
+  const taskByPath = new Map(
+    holding.filter((h) => h.path).map((h) => [h.path!, h.id]),
+  );
 
   return repoRows.map((r) => {
     const wts = db

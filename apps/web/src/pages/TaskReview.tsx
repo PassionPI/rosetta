@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { TaskDTO } from "@rossetta/shared";
+import type { TaskDTO } from "@rosetta/shared";
 import { api } from "../api/client.ts";
 
 export default function TaskReview({ taskId }: { taskId: number }) {

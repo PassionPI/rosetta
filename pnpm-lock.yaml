@@ -22,7 +22,7 @@ importers:
       '@fastify/websocket':
         specifier: ^11.3.0
         version: 11.3.0
-      '@rossetta/shared':
+      '@rosetta/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       better-sqlite3:
@@ -62,7 +62,7 @@ importers:
 
   apps/web:
     dependencies:
-      '@rossetta/shared':
+      '@rosetta/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       '@tanstack/react-query':

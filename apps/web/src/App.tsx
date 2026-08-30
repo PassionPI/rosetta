@@ -1,13 +1,13 @@
-import { useEffect, useState } from "react";
+import type { WsServerMessage } from "@rosetta/shared";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { WsServerMessage } from "@rossetta/shared";
+import { useEffect, useState } from "react";
 import { api } from "./api/client.ts";
-import { wsClient } from "./ws/client.ts";
 import Login from "./pages/Login.tsx";
+import ProjectBoard from "./pages/ProjectBoard.tsx";
 import SessionList from "./pages/SessionList.tsx";
 import SessionView from "./pages/SessionView.tsx";
-import ProjectBoard from "./pages/ProjectBoard.tsx";
 import TaskReview from "./pages/TaskReview.tsx";
+import { wsClient } from "./ws/client.ts";
 
 function useHashRoute(): string {
   const [hash, setHash] = useState(() => location.hash || "#/sessions");
@@ -53,14 +53,16 @@ export default function App() {
   let page: React.ReactNode;
   if (seg[0] === "session" && seg[1]) page = <SessionView sessionId={seg[1]} />;
   else if (seg[0] === "projects") page = <ProjectBoard />;
-  else if (seg[0] === "repo" && seg[1]) page = <ProjectBoard repoId={Number(seg[1])} />;
-  else if (seg[0] === "task" && seg[1]) page = <TaskReview taskId={Number(seg[1])} />;
+  else if (seg[0] === "repo" && seg[1])
+    page = <ProjectBoard repoId={Number(seg[1])} />;
+  else if (seg[0] === "task" && seg[1])
+    page = <TaskReview taskId={Number(seg[1])} />;
   else page = <SessionList />;
 
   return (
     <div className="app">
       <header className="topbar">
-        <span className="brand">rossetta</span>
+        <span className="brand">rosetta</span>
         <nav>
           <a href="#/sessions">会话</a>
           <a href="#/projects">项目 / 任务</a>

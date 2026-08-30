@@ -3,7 +3,7 @@
 ## 1. Monorepo 布局（pnpm workspaces）
 
 ```
-rossetta/
+rosetta/
 ├─ package.json                  # private, workspaces: ["apps/*", "packages/*"]
 ├─ pnpm-workspace.yaml
 ├─ tsconfig.base.json

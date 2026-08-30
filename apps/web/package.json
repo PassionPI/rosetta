@@ -1,5 +1,5 @@
 {
-  "name": "@rossetta/web",
+  "name": "@rosetta/web",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,7 +8,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@rossetta/shared": "workspace:*",
+    "@rosetta/shared": "workspace:*",
     "@tanstack/react-query": "^5.102.8",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"

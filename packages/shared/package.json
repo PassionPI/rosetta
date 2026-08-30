@@ -1,5 +1,5 @@
 {
-  "name": "@rossetta/shared",
+  "name": "@rosetta/shared",
   "private": true,
   "type": "module",
   "exports": {

@@ -1,14 +1,14 @@
-import fs from "node:fs";
-import type { FastifyInstance } from "fastify";
+import type { EntryDTO, SessionSummary } from "@rosetta/shared";
 import { desc, eq } from "drizzle-orm";
-import type { EntryDTO, SessionSummary } from "@rossetta/shared";
+import type { FastifyInstance } from "fastify";
+import fs from "node:fs";
+import { getModelRuntime } from "../agent/factory.ts";
+import { registry } from "../agent/registry.ts";
+import { checkPassword, issueToken } from "../auth/cookie.ts";
+import { config } from "../config.ts";
 import { db } from "../db/index.ts";
 import { projects, runs, sessions, steps } from "../db/schema.ts";
-import { config } from "../config.ts";
-import { checkPassword, issueToken } from "../auth/cookie.ts";
-import { registry } from "../agent/registry.ts";
 import { recorder } from "../recorder/event-recorder.ts";
-import { getModelRuntime } from "../agent/factory.ts";
 import { refreshStaleProjects } from "../sync/projects.ts";
 
 function rowToSummary(row: typeof sessions.$inferSelect): SessionSummary {
@@ -68,7 +68,8 @@ export async function coreRoutes(app: FastifyInstance): Promise<void> {
   // ── auth ──
   app.post("/auth/login", async (req, reply) => {
     const { password } = (req.body ?? {}) as { password?: string };
-    if (!password || !checkPassword(password)) return reply.code(401).send({ error: "密码错误" });
+    if (!password || !checkPassword(password))
+      return reply.code(401).send({ error: "密码错误" });
     reply.setCookie(config.cookieName, issueToken(), {
       httpOnly: true,
       sameSite: "lax",
@@ -82,14 +83,28 @@ export async function coreRoutes(app: FastifyInstance): Promise<void> {
 
   // ── sessions ──
   app.post("/sessions", async (req, reply) => {
-    const body = (req.body ?? {}) as { cwd?: string; name?: string; model?: string };
+    const body = (req.body ?? {}) as {
+      cwd?: string;
+      name?: string;
+      model?: string;
+    };
     if (!body.cwd) return reply.code(400).send({ error: "cwd 必填" });
     try {
-      const entry = await registry.create({ cwd: body.cwd, name: body.name, modelSpec: body.model });
-      const row = db.select().from(sessions).where(eq(sessions.id, entry.sessionId)).get();
+      const entry = await registry.create({
+        cwd: body.cwd,
+        name: body.name,
+        modelSpec: body.model,
+      });
+      const row = db
+        .select()
+        .from(sessions)
+        .where(eq(sessions.id, entry.sessionId))
+        .get();
       return row ? rowToSummary(row) : { id: entry.sessionId };
     } catch (e) {
-      return reply.code(400).send({ error: e instanceof Error ? e.message : String(e) });
+      return reply
+        .code(400)
+        .send({ error: e instanceof Error ? e.message : String(e) });
     }
   });
 
@@ -110,7 +125,10 @@ export async function coreRoutes(app: FastifyInstance): Promise<void> {
     const row = db.select().from(sessions).where(eq(sessions.id, id)).get();
     if (!row) return reply.code(404).send({ error: "会话不存在" });
     const entry = registry.get(id);
-    return { ...rowToSummary(row), streaming: entry?.session.isStreaming ?? false };
+    return {
+      ...rowToSummary(row),
+      streaming: entry?.session.isStreaming ?? false,
+    };
   });
 
   app.get("/sessions/:id/entries", async (req, reply) => {
@@ -136,13 +154,20 @@ export async function coreRoutes(app: FastifyInstance): Promise<void> {
     if (body.images?.length) {
       opts.images = body.images.map((img) => ({
         type: "image" as const,
-        source: { type: "base64" as const, mediaType: img.mediaType, data: img.data },
+        source: {
+          type: "base64" as const,
+          mediaType: img.mediaType,
+          data: img.data,
+        },
       }));
     }
-    if (entry.session.isStreaming) opts.streamingBehavior = body.streamingBehavior ?? "steer";
+    if (entry.session.isStreaming)
+      opts.streamingBehavior = body.streamingBehavior ?? "steer";
     entry.session
       .prompt(body.text, opts as never)
-      .catch((err) => recorder.failRun(id, err instanceof Error ? err.message : String(err)));
+      .catch((err) =>
+        recorder.failRun(id, err instanceof Error ? err.message : String(err)),
+      );
     return { runId };
   });
 
@@ -198,25 +223,44 @@ export async function coreRoutes(app: FastifyInstance): Promise<void> {
   // ── runs / steps ──
   app.get("/sessions/:id/runs", async (req) => {
     const { id } = req.params as { id: string };
-    return db.select().from(runs).where(eq(runs.sessionId, id)).orderBy(desc(runs.startedAt)).limit(100).all();
+    return db
+      .select()
+      .from(runs)
+      .where(eq(runs.sessionId, id))
+      .orderBy(desc(runs.startedAt))
+      .limit(100)
+      .all();
   });
 
   app.get("/runs/:id/steps", async (req) => {
     const { id } = req.params as { id: string };
     const runId = Number(id);
-    return db.select().from(steps).where(eq(steps.runId, runId)).orderBy(steps.id).all();
+    return db
+      .select()
+      .from(steps)
+      .where(eq(steps.runId, runId))
+      .orderBy(steps.id)
+      .all();
   });
 
   // ── models ──
   app.get("/models", async () => {
     const runtime = await getModelRuntime();
     const available = await runtime.getAvailable();
-    return available.map((m) => ({ providerId: m.provider, modelId: m.id, displayName: m.name ?? m.id }));
+    return available.map((m) => ({
+      providerId: m.provider,
+      modelId: m.id,
+      displayName: m.name ?? m.id,
+    }));
   });
 
   // ── projects（folder as project）──
   app.get("/projects", async () => {
     await refreshStaleProjects().catch(() => {});
-    return db.select().from(projects).orderBy(desc(projects.lastActiveAt)).all();
+    return db
+      .select()
+      .from(projects)
+      .orderBy(desc(projects.lastActiveAt))
+      .all();
   });
 }

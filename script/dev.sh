@@ -18,6 +18,6 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "server → http://localhost:${HARNESS_PORT:-3173}   web → http://localhost:5173"
-pnpm --filter @rossetta/server dev & pids+=($!)
-pnpm --filter @rossetta/web dev & pids+=($!)
+pnpm --filter @rosetta/server dev & pids+=($!)
+pnpm --filter @rosetta/web dev & pids+=($!)
 wait

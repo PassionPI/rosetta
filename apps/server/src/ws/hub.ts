@@ -1,5 +1,5 @@
+import type { TaskDTO, WsServerMessage } from "@rosetta/shared";
 import type { WebSocket } from "ws";
-import type { TaskDTO, WsServerMessage } from "@rossetta/shared";
 
 interface Client {
   ws: WebSocket;
@@ -21,7 +21,11 @@ class Hub {
   subscribe(client: Client, sessionId: string): void {
     client.sessions.add(sessionId);
     // 骨架阶段 backlog 仅通知；客户端随后走 REST 拉全量（完整回放见 md/04 §4 TODO）
-    this.send(client, { kind: "backlog", sessionId, lastSeq: this.seq(sessionId) });
+    this.send(client, {
+      kind: "backlog",
+      sessionId,
+      lastSeq: this.seq(sessionId),
+    });
   }
 
   unsubscribe(client: Client, sessionId: string): void {
@@ -41,8 +45,19 @@ class Hub {
   }
 
   /** run 状态信封（订阅该 session 的客户端） */
-  runStatus(sessionId: string, runId: number | null, status: string, error?: string): void {
-    this.broadcastTo(sessionId, { kind: "run_status", sessionId, runId, status, error });
+  runStatus(
+    sessionId: string,
+    runId: number | null,
+    status: string,
+    error?: string,
+  ): void {
+    this.broadcastTo(sessionId, {
+      kind: "run_status",
+      sessionId,
+      runId,
+      status,
+      error,
+    });
   }
 
   /** 任务状态变化：全局广播 */
@@ -58,11 +73,13 @@ class Hub {
   }
 
   private broadcastTo(sessionId: string, msg: WsServerMessage): void {
-    for (const c of this.clients) if (c.sessions.has(sessionId)) this.send(c, msg);
+    for (const c of this.clients)
+      if (c.sessions.has(sessionId)) this.send(c, msg);
   }
 
   private send(client: Client, msg: WsServerMessage): void {
-    if (client.ws.readyState === client.ws.OPEN) client.ws.send(JSON.stringify(msg));
+    if (client.ws.readyState === client.ws.OPEN)
+      client.ws.send(JSON.stringify(msg));
   }
 }
 

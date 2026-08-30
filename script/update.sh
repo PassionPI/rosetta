@@ -8,14 +8,14 @@ echo "── pnpm install ──"
 pnpm install
 
 echo "── build ──"
-pnpm --filter @rossetta/server build
-pnpm --filter @rossetta/web build
+pnpm --filter @rosetta/server build
+pnpm --filter @rosetta/web build
 
 echo "── restart ──"
-if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet rossetta 2>/dev/null; then
-  sudo systemctl restart rossetta
+if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet rosetta 2>/dev/null; then
+  sudo systemctl restart rosetta
   sleep 2
-  systemctl --no-pager -l status rossetta | head -8
+  systemctl --no-pager -l status rosetta | head -8
 else
   "$ROOT/script/stop.sh" || true
   "$ROOT/script/start.sh"

@@ -1,4 +1,4 @@
-import type { WsClientMessage, WsServerMessage } from "@rossetta/shared";
+import type { WsClientMessage, WsServerMessage } from "@rosetta/shared";
 
 type Handler = (msg: WsServerMessage) => void;
 
@@ -15,7 +15,8 @@ class WsClient {
     const ws = new WebSocket(`${proto}://${location.host}/ws`);
     this.ws = ws;
     ws.onopen = () => {
-      for (const id of this.sessionIds) this.send({ type: "subscribe", sessionId: id });
+      for (const id of this.sessionIds)
+        this.send({ type: "subscribe", sessionId: id });
     };
     ws.onmessage = (ev) => {
       try {
@@ -35,7 +36,8 @@ class WsClient {
   }
 
   private send(msg: WsClientMessage): void {
-    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
+    if (this.ws?.readyState === WebSocket.OPEN)
+      this.ws.send(JSON.stringify(msg));
   }
 
   subscribe(sessionId: string): void {
