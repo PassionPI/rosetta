@@ -2,7 +2,7 @@ import type { EntryDTO, SessionSummary } from "@rosetta/shared";
 import { desc, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import fs from "node:fs";
-import { getModelRuntime } from "../agent/factory.ts";
+import { getModelRuntime, resolveModelSpec } from "../agent/factory.ts";
 import { registry } from "../agent/registry.ts";
 import { checkPassword, issueToken } from "../auth/cookie.ts";
 import { config } from "../config.ts";
@@ -192,8 +192,32 @@ export async function coreRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true };
   });
 
-  app.post("/sessions/:id/abort", async (req, reply) => {
+  /** 运行中切换模型："provider/model" 或 "provider/model:thinking" */
+  app.post("/sessions/:id/model", async (req, reply) => {
     const { id } = req.params as { id: string };
+    const { model } = (req.body ?? {}) as { model?: string };
+    if (!model) return reply.code(400).send({ error: "model 必填（provider/model[:thinking]）" });
+    const entry = await registry.acquire(id);
+    if (!entry) return reply.code(404).send({ error: "会话不存在" });
+    try {
+      const { model: m, thinkingLevel } = await resolveModelSpec(model);
+      await entry.session.setModel(m);
+      if (thinkingLevel) entry.session.setThinkingLevel(thinkingLevel);
+      db.update(sessions)
+        .set({
+          provider: m.provider,
+          modelId: m.id,
+          thinkingLevel: String(entry.session.thinkingLevel ?? ""),
+        })
+        .where(eq(sessions.id, id))
+        .run();
+      return { ok: true, provider: m.provider, modelId: m.id, thinkingLevel: entry.session.thinkingLevel };
+    } catch (e) {
+      return reply.code(400).send({ error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  app.post("/sessions/:id/abort", async (req, reply) => {    const { id } = req.params as { id: string };
     const entry = await registry.acquire(id);
     if (!entry) return reply.code(404).send({ error: "会话不存在" });
     await entry.session.abort();

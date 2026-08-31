@@ -1,0 +1,71 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:is(.dark *));
+
+/* shadcn neutral 主题（常暗：:root 即暗色变量） */
+:root {
+  --radius: 0.625rem;
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.905 0.002 252);
+  --card: oklch(0.185 0.005 252);
+  --card-foreground: oklch(0.905 0.002 252);
+  --popover: oklch(0.185 0.005 252);
+  --popover-foreground: oklch(0.905 0.002 252);
+  --primary: oklch(0.68 0.14 245);
+  --primary-foreground: oklch(0.12 0.02 245);
+  --secondary: oklch(0.24 0.008 252);
+  --secondary-foreground: oklch(0.905 0.002 252);
+  --muted: oklch(0.24 0.008 252);
+  --muted-foreground: oklch(0.65 0.01 252);
+  --accent: oklch(0.24 0.008 252);
+  --accent-foreground: oklch(0.905 0.002 252);
+  --destructive: oklch(0.62 0.2 20);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.28 0.01 252);
+  --input: oklch(0.28 0.01 252);
+  --ring: oklch(0.68 0.14 245);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family:
+      ui-sans-serif, system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  code,
+  pre,
+  kbd {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+}

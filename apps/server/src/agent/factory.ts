@@ -31,6 +31,16 @@ export interface BuildSessionOptions {
  * 创建 AgentSession（md/01 §3.5 pi 环境零定制：默认 agentDir / settings / extensions 发现）。
  * 骨架阶段不做 runtime 级会话替换（fork/switch），Registry 每会话独立创建。
  */
+/** 解析 "provider/model:thinking" 形式的模型描述 */
+export async function resolveModelSpec(spec: string) {
+  const modelRuntime = await getModelRuntime();
+  const resolved = resolveCliModel({ cliModel: spec, modelRuntime });
+  if (resolved.error || !resolved.model) {
+    throw new Error(resolved.error ?? `无法解析模型: ${spec}`);
+  }
+  return { model: resolved.model, thinkingLevel: resolved.thinkingLevel };
+}
+
 export async function buildSession(opts: BuildSessionOptions): Promise<{
   session: AgentSession;
   modelFallbackMessage?: string;
@@ -39,18 +49,17 @@ export async function buildSession(opts: BuildSessionOptions): Promise<{
   const options: CreateAgentSessionOptions = {
     cwd: opts.cwd,
     modelRuntime,
-    tools: opts.tools ?? DEFAULT_TOOLS,
+    // tools 是白名单：自定义工具必须并入名单，否则不会暴露给模型
+    // （此前 submit_for_review 未生效的根因）
+    tools: [...(opts.tools ?? DEFAULT_TOOLS), ...(opts.customTools?.map((t) => t.name) ?? [])],
     customTools: opts.customTools,
     sessionManager: opts.sessionManager,
   };
 
   if (opts.modelSpec) {
-    const resolved = resolveCliModel({ cliModel: opts.modelSpec, modelRuntime });
-    if (resolved.error || !resolved.model) {
-      throw new Error(resolved.error ?? `无法解析模型: ${opts.modelSpec}`);
-    }
-    options.model = resolved.model;
-    if (resolved.thinkingLevel) options.thinkingLevel = resolved.thinkingLevel;
+    const { model, thinkingLevel } = await resolveModelSpec(opts.modelSpec);
+    options.model = model;
+    if (thinkingLevel) options.thinkingLevel = thinkingLevel;
   }
 
   const result = await createAgentSession(options);

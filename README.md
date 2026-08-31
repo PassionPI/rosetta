@@ -17,7 +17,7 @@ pnpm install
 cp .env.example .env         # 改 HARNESS_PASSWORD
 
 pnpm dev:server              # http://localhost:3173
-pnpm dev:web                 # http://localhost:5173（代理 /api /ws 到 server）
+pnpm dev:web                 # http://localhost:9999（--host 暴露局域网，代理 /api /ws 到 server）
 ```
 
 pi 凭证复用运行机器上的 `~/.pi/agent/auth.json`（在目标 dev server 上 `pi` 登录一次）。

@@ -1,5 +1,9 @@
-import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { api } from "../api/client.ts";
 
 export default function Login() {
@@ -24,21 +28,29 @@ export default function Login() {
   };
 
   return (
-    <div className="center">
-      <form className="card login" onSubmit={submit}>
-        <h2>rosetta</h2>
-        <input
-          type="password"
-          placeholder="密码（HARNESS_PASSWORD）"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          autoFocus
-        />
-        {error && <div className="error">{error}</div>}
-        <button disabled={busy || !password}>
-          {busy ? "登录中…" : "登录"}
-        </button>
-      </form>
+    <div className="flex min-h-screen items-center justify-center px-4">
+      <Card className="w-full max-w-sm">
+        <CardHeader>
+          <CardTitle className="tracking-widest">rossetta</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form className="flex flex-col gap-3" onSubmit={submit}>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="password">密码</Label>
+              <Input
+                id="password"
+                type="password"
+                placeholder="HARNESS_PASSWORD"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoFocus
+              />
+            </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+            <Button disabled={busy || !password}>{busy ? "登录中…" : "登录"}</Button>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -1,6 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { EntryDTO, SessionSummary } from "@rosetta/shared";
+import { ArrowLeft, CircleStop, CornerDownLeft, Send } from "lucide-react";
+import type { EntryDTO, ModelInfo, SessionSummary } from "@rossetta/shared";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import Markdown from "../components/Markdown.tsx";
 import { api } from "../api/client.ts";
 import { wsClient } from "../ws/client.ts";
 
@@ -18,8 +32,8 @@ function EntryView({ e }: { e: EntryDTO }) {
     const m = p.message ?? {};
     if (m.role === "user") {
       return (
-        <div className="msg user">
-          <pre>{textOf(m.content)}</pre>
+        <div className="ml-auto max-w-[86%] whitespace-pre-wrap rounded-xl border border-primary/30 bg-primary/10 p-3 text-sm">
+          {textOf(m.content)}
         </div>
       );
     }
@@ -29,22 +43,24 @@ function EntryView({ e }: { e: EntryDTO }) {
       const text = parts.filter((c) => c.type === "text").map((c) => c.text).join("");
       const calls = parts.filter((c) => c.type === "toolCall");
       return (
-        <div className="msg assistant">
+        <div className="mr-auto max-w-[86%] space-y-2 rounded-xl border bg-card p-3 text-sm">
           {thinking && (
-            <details className="thinking">
-              <summary>thinking</summary>
-              <pre>{thinking}</pre>
+            <details className="text-xs text-muted-foreground">
+              <summary className="cursor-pointer select-none">thinking</summary>
+              <pre className="mt-1 whitespace-pre-wrap">{thinking}</pre>
             </details>
           )}
-          {text && <pre>{text}</pre>}
+          {text && <Markdown>{text}</Markdown>}
           {calls.length > 0 && (
-            <div className="calls">
+            <div className="space-y-1 text-xs text-muted-foreground">
               {calls.map((c) => (
                 <details key={c.id}>
-                  <summary>
-                    <code>{c.name}</code>
+                  <summary className="cursor-pointer select-none">
+                    <code className="text-primary">{c.name}</code>
                   </summary>
-                  <pre>{JSON.stringify(c.arguments, null, 2)}</pre>
+                  <pre className="mt-1 whitespace-pre-wrap">
+                    {JSON.stringify(c.arguments, null, 2)}
+                  </pre>
                 </details>
               ))}
             </div>
@@ -54,18 +70,28 @@ function EntryView({ e }: { e: EntryDTO }) {
     }
     if (m.role === "toolResult") {
       return (
-        <details className={`toolresult ${m.isError ? "err" : ""}`}>
-          <summary>
+        <details className={`mr-auto max-w-[86%] text-xs ${m.isError ? "text-destructive" : "text-muted-foreground"}`}>
+          <summary className="cursor-pointer select-none">
             <code>{m.toolName}</code> {m.isError ? "✖" : "✓"}
           </summary>
-          <pre>{textOf(m.content).slice(0, 4000)}</pre>
+          <pre className="mt-1 whitespace-pre-wrap rounded-lg border bg-black/30 p-2">
+            {textOf(m.content).slice(0, 4000)}
+          </pre>
         </details>
       );
     }
     return null;
   }
-  if (e.kind === "compaction") return <div className="sys">⋯ 上下文已压缩（{p.tokensBefore ?? "?"} tokens → 摘要）</div>;
-  if (e.kind === "branch_summary") return <div className="sys">⋯ 分支切换摘要</div>;
+  if (e.kind === "compaction") {
+    return (
+      <p className="text-center text-xs text-muted-foreground">
+        ⋯ 上下文已压缩（{p.tokensBefore ?? "?"} tokens → 摘要）
+      </p>
+    );
+  }
+  if (e.kind === "branch_summary") {
+    return <p className="text-center text-xs text-muted-foreground">⋯ 分支切换摘要</p>;
+  }
   return null;
 }
 
@@ -136,67 +162,124 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
 
   const abort = useMutation({ mutationFn: () => api.post(`/api/sessions/${sessionId}/abort`) });
 
+  // 模型切换
+  const models = useQuery({
+    queryKey: ["models"],
+    queryFn: () => api.get<ModelInfo[]>("/api/models"),
+    staleTime: 60_000,
+  });
+  const setModel = useMutation({
+    mutationFn: (spec: string) => api.post(`/api/sessions/${sessionId}/model`, { model: spec }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["session", sessionId] }),
+  });
+
   const s = session.data;
+  const currentSpec = s?.provider && s?.modelId ? `${s.provider}/${s.modelId}` : "";
+
   return (
-    <div className="page session">
-      <div className="session-head">
-        <a href="#/sessions">← 返回</a>
-        <h3>{s?.name || s?.id?.slice(0, 8) || "…"}</h3>
-        <span className="meta">
-          {s?.modelId && <span className="badge">{s.modelId}</span>}
-          <code className="cwd-inline">{s?.cwd}</code>
+    <div className="mx-auto flex max-w-3xl flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <Button variant="ghost" size="sm" onClick={() => (location.hash = "#/sessions")}>
+          <ArrowLeft className="size-4" /> 返回
+        </Button>
+        <h2 className="text-base font-semibold">{s?.name || s?.id?.slice(0, 8) || "…"}</h2>
+        <div className="w-60">
+          <Select
+            value={setModel.isPending ? "__pending" : currentSpec || "__placeholder"}
+            onValueChange={(v) => {
+              if (v !== "__placeholder" && v !== "__pending") setModel.mutate(v);
+            }}
+            disabled={setModel.isPending}
+          >
+            <SelectTrigger size="sm" className="w-full">
+              <SelectValue placeholder="模型" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__placeholder" disabled>
+                {setModel.isPending ? "切换中…" : (s?.modelId ?? "模型")}
+              </SelectItem>
+              {(models.data ?? []).map((m) => {
+                const spec = `${m.providerId}/${m.modelId}`;
+                return (
+                  <SelectItem key={spec} value={spec}>
+                    {m.displayName}（{spec}）
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          {isStreaming && (
+            <Badge className="border-emerald-600/50 bg-emerald-600/10 text-emerald-400">
+              ● streaming
+            </Badge>
+          )}
+          <code className="hidden truncate sm:inline">{s?.cwd}</code>
           {s?.taskId && (
-            <a className="badge task" href={`#/task/${s.taskId}`}>
+            <a
+              href={`#/task/${s.taskId}`}
+              className="rounded border border-amber-500/50 px-1.5 py-px text-amber-400"
+            >
               task #{s.taskId}
             </a>
           )}
-          {isStreaming && <span className="badge live">● streaming</span>}
-        </span>
+        </div>
       </div>
 
-      <div className="messages">
+      <div className="flex h-[56vh] flex-col gap-2 overflow-y-auto rounded-lg border bg-black/10 p-3">
         {(entries.data ?? []).map((e) => (
           <EntryView key={e.id} e={e} />
         ))}
         {streaming && (
-          <div className="msg assistant streaming">
-            <pre>{streaming}</pre>
+          <div className="mr-auto max-w-[86%] rounded-xl border border-dashed border-primary/50 bg-card p-3 text-sm">
+            <Markdown>{streaming}</Markdown>
           </div>
         )}
-        {(entries.data ?? []).length === 0 && !streaming && <div className="muted center">空会话，发送第一条消息开始</div>}
+        {(entries.data ?? []).length === 0 && !streaming && (
+          <p className="m-auto text-sm text-muted-foreground">空会话，发送第一条消息开始</p>
+        )}
         <div ref={bottomRef} />
       </div>
 
-      <div className="composer card">
-        <textarea
-          placeholder={isStreaming ? "正在生成… 可插话（steer）或排队（follow-up）" : "输入消息…"}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send.mutate();
-          }}
-        />
-        <div className="row">
-          {isStreaming ? (
-            <>
-              <button disabled={!input.trim() || send.isPending} onClick={() => send.mutate("steer")}>
-                插话 steer
-              </button>
-              <button disabled={!input.trim() || send.isPending} onClick={() => send.mutate("followUp")}>
-                排队 follow-up
-              </button>
-              <button className="danger" disabled={abort.isPending} onClick={() => abort.mutate()}>
-                中止
-              </button>
-            </>
-          ) : (
-            <button className="primary" disabled={!input.trim() || send.isPending} onClick={() => send.mutate()}>
-              发送 ⌘↵
-            </button>
-          )}
-          {send.isError && <span className="error">{String(send.error)}</span>}
-        </div>
-      </div>
+      <Card>
+        <CardContent className="flex flex-col gap-2 p-3">
+          <Label htmlFor="composer" className="sr-only">
+            消息
+          </Label>
+          <Textarea
+            id="composer"
+            className="min-h-20"
+            placeholder={isStreaming ? "正在生成… 可插话（steer）或排队（follow-up）" : "输入消息…"}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send.mutate();
+            }}
+          />
+          <div className="flex items-center gap-2">
+            {isStreaming ? (
+              <>
+                <Button size="sm" variant="secondary" disabled={!input.trim() || send.isPending} onClick={() => send.mutate("steer")}>
+                  插话 steer
+                </Button>
+                <Button size="sm" variant="secondary" disabled={!input.trim() || send.isPending} onClick={() => send.mutate("followUp")}>
+                  排队 follow-up
+                </Button>
+                <Button size="sm" variant="destructive" disabled={abort.isPending} onClick={() => abort.mutate()}>
+                  <CircleStop className="size-4" /> 中止
+                </Button>
+              </>
+            ) : (
+              <Button size="sm" disabled={!input.trim() || send.isPending} onClick={() => send.mutate()}>
+                <Send className="size-4" /> 发送
+                <kbd className="ml-1 rounded bg-black/30 px-1 text-[10px]">⌘↵</kbd>
+              </Button>
+            )}
+            {send.isError && <span className="text-xs text-destructive">{String(send.error)}</span>}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

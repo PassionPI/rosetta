@@ -6,7 +6,7 @@ import { log } from "../util/log.ts";
 import { addWorktree, refreshWorktrees, registerRepo } from "../orchestrator/repo-service.ts";
 import { listReposWithWorktrees, listTaskDTOs, loadTaskDTO } from "../orchestrator/queries.ts";
 import { acceptTask, emitTask, nudgeTask, rejectTask } from "../orchestrator/task-runner.ts";
-import { dispatch } from "../orchestrator/scheduler.ts";
+import { dispatch, recheckUnavailableSlots } from "../orchestrator/scheduler.ts";
 
 export async function orchestratorRoutes(app: FastifyInstance): Promise<void> {
   // ── repos / worktree 池 ──
@@ -45,12 +45,13 @@ export async function orchestratorRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  /** worktree 状态刷新（unavailable 恢复等） */
+  /** worktree 状态刷新（发现新 worktree + unavailable 复查恢复） */
   app.post("/repos/:id/refresh", async (req, reply) => {
     const { id } = req.params as { id: string };
     const repo = db.select().from(repos).where(eq(repos.id, Number(id))).get();
     if (!repo) return reply.code(404).send({ error: "repo 不存在" });
     await refreshWorktrees(repo.id, repo.repoRoot);
+    await recheckUnavailableSlots(repo.id).catch(() => 0);
     return listReposWithWorktrees().find((r) => r.id === repo.id);
   });
 

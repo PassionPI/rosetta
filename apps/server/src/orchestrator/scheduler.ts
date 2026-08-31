@@ -1,4 +1,4 @@
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.ts";
 import { taskDeps, tasks, worktrees } from "../db/schema.ts";
 import { log } from "../util/log.ts";
@@ -14,6 +14,34 @@ type WorktreeRow = typeof worktrees.$inferSelect;
 const dispatching = new Set<number>();
 
 /**
+ * unavailable 状态复查（md/08 §9）：派发时工作区 dirty 的 slot 会被标记 unavailable，
+ * 这里重新做脏检查——已干净的恢复为 idle。dispatch 前与 POST /repos/:id/refresh 都会调用。
+ */
+export async function recheckUnavailableSlots(repoId: number): Promise<number> {
+  const rows = db
+    .select()
+    .from(worktrees)
+    .where(and(eq(worktrees.repoId, repoId), eq(worktrees.status, "unavailable")))
+    .all();
+  let recovered = 0;
+  for (const w of rows) {
+    try {
+      if (!(await worktreeIsDirty(w.path))) {
+        db.update(worktrees)
+          .set({ status: "idle", updatedAt: Date.now() })
+          .where(eq(worktrees.path, w.path))
+          .run();
+        recovered++;
+        log.info(`[scheduler] slot ${w.path} 工作区已干净，恢复 idle`);
+      }
+    } catch (e) {
+      log.warn(`[scheduler] slot ${w.path} 状态复查失败:`, e);
+    }
+  }
+  return recovered;
+}
+
+/**
  * 调度器（md/08 §5）：FIFO × 最小空闲 slot。
  * 事件驱动触发：task 创建 / done / cancel / worktree 增删 / boot。
  */
@@ -21,6 +49,8 @@ export async function dispatch(repoId: number): Promise<void> {
   if (dispatching.has(repoId)) return;
   dispatching.add(repoId);
   try {
+    // 每次派发前复查 unavailable slot（用户要求：派发时重新获取状态）
+    await recheckUnavailableSlots(repoId).catch(() => 0);
     const slots = db
       .select()
       .from(worktrees)
