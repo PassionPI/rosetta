@@ -24,11 +24,17 @@ interface ListState {
   newModel: string;
 }
 
+/** 新建会话草稿：editDraft 局部编辑，resetDraft 一次清空 */
+interface SessionDraft {
+  cwd?: string;
+  name?: string;
+  model?: string;
+}
+
 interface ListActions {
   toggleCwd: string;
-  setNewCwd: string;
-  setNewName: string;
-  setNewModel: string;
+  editDraft: SessionDraft;
+  resetDraft: null;
 }
 
 export default function SessionList() {
@@ -41,14 +47,15 @@ export default function SessionList() {
       toggleCwd: (s, path) => {
         s.cwd = s.cwd === path ? null : path;
       },
-      setNewCwd: (s, v) => {
-        s.newCwd = v;
+      editDraft: (s, draft) => {
+        if (draft.cwd !== undefined) s.newCwd = draft.cwd;
+        if (draft.name !== undefined) s.newName = draft.name;
+        if (draft.model !== undefined) s.newModel = draft.model;
       },
-      setNewName: (s, v) => {
-        s.newName = v;
-      },
-      setNewModel: (s, v) => {
-        s.newModel = v;
+      resetDraft: (s) => {
+        s.newCwd = "";
+        s.newName = "";
+        s.newModel = "";
       },
     }),
   );
@@ -76,9 +83,7 @@ export default function SessionList() {
         model: state.newModel || undefined,
       }).unwrap(),
     onSuccess: (s) => {
-      actions.setNewCwd("");
-      actions.setNewName("");
-      actions.setNewModel("");
+      actions.resetDraft();
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
       void queryClient.invalidateQueries({ queryKey: ["projects"] });
       void navigate({ to: "/session/$sessionId", params: { sessionId: s.id } });
@@ -109,7 +114,7 @@ export default function SessionList() {
               <Label>项目路径（worktree 绝对路径）</Label>
               <Input
                 value={state.newCwd}
-                onChange={(e) => actions.setNewCwd(e.target.value)}
+                onChange={(e) => actions.editDraft({ cwd: e.target.value })}
                 placeholder="/srv/project/worktree-a"
               />
             </div>
@@ -117,7 +122,7 @@ export default function SessionList() {
               <Label>名称（可选）</Label>
               <Input
                 value={state.newName}
-                onChange={(e) => actions.setNewName(e.target.value)}
+                onChange={(e) => actions.editDraft({ name: e.target.value })}
                 placeholder="重构登录"
               />
             </div>
@@ -125,7 +130,7 @@ export default function SessionList() {
               <Label>初始模型</Label>
               <Select
                 value={state.newModel || "default"}
-                onValueChange={actions.setNewModel}
+                onValueChange={(v) => actions.editDraft({ model: v })}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="默认模型" />

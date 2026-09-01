@@ -79,12 +79,14 @@ interface PanelState {
   statusFilter: string;
 }
 
+/** 按业务语义设计 action：resetTaskForm 一次清空描述与依赖 */
 interface PanelActions {
-  setDescription: string;
+  editDescription: string;
   toggleDep: number;
-  setDeps: number[];
-  setWtName: string;
-  setStatusFilter: string;
+  editWtName: string;
+  filterStatus: string;
+  resetTaskForm: null;
+  wtAdded: null;
 }
 
 function RepoPanel({ repo }: { repo: RepoDTO }) {
@@ -98,7 +100,7 @@ function RepoPanel({ repo }: { repo: RepoDTO }) {
       statusFilter: "all",
     }),
     defineActionHandler<PanelState, PanelActions>({
-      setDescription: (s, v) => {
+      editDescription: (s, v) => {
         s.description = v;
       },
       toggleDep: (s, id) => {
@@ -106,14 +108,18 @@ function RepoPanel({ repo }: { repo: RepoDTO }) {
           ? s.deps.filter((x) => x !== id)
           : [...s.deps, id];
       },
-      setDeps: (s, v) => {
-        s.deps = v;
-      },
-      setWtName: (s, v) => {
+      editWtName: (s, v) => {
         s.wtName = v;
       },
-      setStatusFilter: (s, v) => {
+      filterStatus: (s, v) => {
         s.statusFilter = v;
+      },
+      resetTaskForm: (s) => {
+        s.description = "";
+        s.deps = [];
+      },
+      wtAdded: (s) => {
+        s.wtName = "";
       },
     }),
   );
@@ -135,15 +141,14 @@ function RepoPanel({ repo }: { repo: RepoDTO }) {
         dependsOn: state.deps.length ? state.deps : undefined,
       }).unwrap(),
     onSuccess: () => {
-      actions.setDescription("");
-      actions.setDeps([]);
+      actions.resetTaskForm();
       void queryClient.invalidateQueries({ queryKey: ["tasks", repo.id] });
     },
   });
   const addWt = useMutation({
     mutationFn: () => addWorktree(repo.id, { name: state.wtName }).unwrap(),
     onSuccess: () => {
-      actions.setWtName("");
+      actions.wtAdded();
       void queryClient.invalidateQueries({ queryKey: ["repos"] });
     },
   });
@@ -260,7 +265,7 @@ function RepoPanel({ repo }: { repo: RepoDTO }) {
             <Label>新 worktree（建在 repo 同级目录）</Label>
             <Input
               value={state.wtName}
-              onChange={(e) => actions.setWtName(e.target.value)}
+              onChange={(e) => actions.editWtName(e.target.value)}
               placeholder="feature-x"
             />
           </div>
@@ -286,7 +291,7 @@ function RepoPanel({ repo }: { repo: RepoDTO }) {
           ).map(([key, label]) => (
             <button
               key={key}
-              onClick={() => actions.setStatusFilter(key)}
+              onClick={() => actions.filterStatus(key)}
               className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
                 state.statusFilter === key
                   ? "border-primary/60 bg-primary/10 text-primary"
@@ -381,7 +386,7 @@ function RepoPanel({ repo }: { repo: RepoDTO }) {
           <Textarea
             placeholder="任务描述（一段话）"
             value={state.description}
-            onChange={(e) => actions.setDescription(e.target.value)}
+            onChange={(e) => actions.editDescription(e.target.value)}
           />
           {(tasks.data ?? []).length > 0 && (
             <div className="flex flex-wrap gap-1.5">
@@ -424,7 +429,8 @@ interface BoardState {
 }
 
 interface BoardActions {
-  setPath: string;
+  editPath: string;
+  registered: null;
 }
 
 export default function ProjectBoard({ repoId }: { repoId?: number }) {
@@ -433,8 +439,11 @@ export default function ProjectBoard({ repoId }: { repoId?: number }) {
   const [state, actions] = useAction(
     (): BoardState => ({ path: "" }),
     defineActionHandler<BoardState, BoardActions>({
-      setPath: (s, v) => {
+      editPath: (s, v) => {
         s.path = v;
+      },
+      registered: (s) => {
+        s.path = "";
       },
     }),
   );
@@ -446,7 +455,7 @@ export default function ProjectBoard({ repoId }: { repoId?: number }) {
   const register = useMutation({
     mutationFn: () => registerRepo({ path: state.path }).unwrap(),
     onSuccess: () => {
-      actions.setPath("");
+      actions.registered();
       void queryClient.invalidateQueries({ queryKey: ["repos"] });
     },
   });
@@ -465,7 +474,7 @@ export default function ProjectBoard({ repoId }: { repoId?: number }) {
             <Label>仓库路径（main worktree 或其子目录）</Label>
             <Input
               value={state.path}
-              onChange={(e) => actions.setPath(e.target.value)}
+              onChange={(e) => actions.editPath(e.target.value)}
               placeholder="/srv/my-project"
             />
           </div>

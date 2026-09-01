@@ -14,10 +14,11 @@ interface LoginState {
   busy: boolean;
 }
 
+/** 按业务语义设计 action：提交开始/失败各自收敛多个字段 */
 interface LoginActions {
-  setPassword: string;
-  setError: string | null;
-  setBusy: boolean;
+  typePassword: string;
+  startSubmit: null;
+  failSubmit: string;
 }
 
 export default function Login() {
@@ -27,30 +28,28 @@ export default function Login() {
   const [state, actions] = useAction(
     (): LoginState => ({ password: "", error: null, busy: false }),
     defineActionHandler<LoginState, LoginActions>({
-      setPassword: (s, v) => {
+      typePassword: (s, v) => {
         s.password = v;
       },
-      setError: (s, v) => {
-        s.error = v;
+      startSubmit: (s) => {
+        s.busy = true;
+        s.error = null;
       },
-      setBusy: (s, v) => {
-        s.busy = v;
+      failSubmit: (s, msg) => {
+        s.error = msg;
+        s.busy = false;
       },
     }),
   );
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    actions.setBusy(true);
-    actions.setError(null);
+    actions.startSubmit();
     const [err] = await login({ password: state.password });
     if (err) {
-      actions.setError(
-        err instanceof ApiError && err.status === 401
-          ? "密码错误"
-          : err.message,
+      actions.failSubmit(
+        err instanceof ApiError && err.status === 401 ? "密码错误" : err.message,
       );
-      actions.setBusy(false);
       return;
     }
     await queryClient.invalidateQueries({ queryKey: ["me"] });
@@ -72,7 +71,7 @@ export default function Login() {
                 type="password"
                 placeholder="HARNESS_PASSWORD"
                 value={state.password}
-                onChange={(e) => actions.setPassword(e.target.value)}
+                onChange={(e) => actions.typePassword(e.target.value)}
                 autoFocus
               />
             </div>

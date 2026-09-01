@@ -137,12 +137,14 @@ interface ViewState {
   toolsOpen: boolean;
 }
 
+/** 按业务语义设计 action：runStatus 置状态时顺带结束流式；sent 清空已发送输入 */
 interface ViewActions {
+  editInput: string;
+  sent: null;
   appendDelta: string;
-  clearStreaming: null;
-  setRunStatus: string | null;
-  setInput: string;
-  setToolsOpen: boolean;
+  stopStreaming: null;
+  runStatus: string;
+  toggleTools: boolean;
 }
 
 export default function SessionView({
@@ -163,19 +165,23 @@ export default function SessionView({
       toolsOpen: false,
     }),
     defineActionHandler<ViewState, ViewActions>({
+      editInput: (s, v) => {
+        s.input = v;
+      },
+      sent: (s) => {
+        s.input = "";
+      },
       appendDelta: (s, delta) => {
         s.streaming += delta;
       },
-      clearStreaming: (s) => {
+      stopStreaming: (s) => {
         s.streaming = "";
       },
-      setRunStatus: (s, v) => {
+      runStatus: (s, v) => {
         s.runStatus = v;
+        if (v !== "running") s.streaming = "";
       },
-      setInput: (s, v) => {
-        s.input = v;
-      },
-      setToolsOpen: (s, v) => {
+      toggleTools: (s, v) => {
         s.toolsOpen = v;
       },
     }),
@@ -205,8 +211,7 @@ export default function SessionView({
     const off = wsClient.on((msg) => {
       if (msg.kind === "event" && msg.sessionId !== sessionId) return;
       if (msg.kind === "run_status") {
-        actions.setRunStatus(msg.status);
-        if (msg.status !== "running") actions.clearStreaming();
+        actions.runStatus(msg.status);
         return;
       }
       if (msg.kind !== "event") return;
@@ -221,7 +226,7 @@ export default function SessionView({
         ev.type === "agent_end" ||
         ev.type === "entry_appended"
       ) {
-        actions.clearStreaming();
+        actions.stopStreaming();
         refetchTimer ??= setTimeout(() => {
           refetchTimer = null;
           void queryClient.invalidateQueries({
@@ -257,7 +262,7 @@ export default function SessionView({
         await followUpSession(sessionId, { text }).unwrap();
       else await promptSession(sessionId, { text }).unwrap();
     },
-    onSuccess: () => actions.setInput(""),
+    onSuccess: () => actions.sent(),
   });
 
   const abort = useMutation({
@@ -331,7 +336,7 @@ export default function SessionView({
             </SelectContent>
           </Select>
         </div>
-        <Dialog open={state.toolsOpen} onOpenChange={actions.setToolsOpen}>
+        <Dialog open={state.toolsOpen} onOpenChange={actions.toggleTools}>
           <DialogTrigger asChild>
             <Button variant="outline" size="sm">
               <Wrench className="size-4" />
@@ -420,7 +425,7 @@ export default function SessionView({
                 : "输入消息…"
             }
             value={state.input}
-            onChange={(e) => actions.setInput(e.target.value)}
+            onChange={(e) => actions.editInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send.mutate();
             }}

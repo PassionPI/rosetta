@@ -21,7 +21,8 @@ interface ReviewState {
 }
 
 interface ReviewActions {
-  setFeedback: string;
+  editFeedback: string;
+  rejected: null;
 }
 
 /**
@@ -34,8 +35,11 @@ export default function TaskReview({ taskId }: { taskId: number }) {
   const [state, actions] = useAction(
     (): ReviewState => ({ feedback: "" }),
     defineActionHandler<ReviewState, ReviewActions>({
-      setFeedback: (s, v) => {
+      editFeedback: (s, v) => {
         s.feedback = v;
+      },
+      rejected: (s) => {
+        s.feedback = "";
       },
     }),
   );
@@ -53,7 +57,7 @@ export default function TaskReview({ taskId }: { taskId: number }) {
   const reject = useMutation({
     mutationFn: () => rejectTask(taskId, { feedback: state.feedback }).unwrap(),
     onSuccess: () => {
-      actions.setFeedback("");
+      actions.rejected();
       void queryClient.invalidateQueries({ queryKey: ["task", taskId] });
     },
   });
@@ -191,7 +195,7 @@ export default function TaskReview({ taskId }: { taskId: number }) {
                 className="min-h-16"
                 placeholder="哪里没达预期、期望改成什么样"
                 value={state.feedback}
-                onChange={(e) => actions.setFeedback(e.target.value)}
+                onChange={(e) => actions.editFeedback(e.target.value)}
               />
             </div>
             <div>

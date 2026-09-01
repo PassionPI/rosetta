@@ -28,6 +28,12 @@ rosetta — 基于 pi agent 的 web harness（TS server + Web UI）。
 
 - **禁止 `useState`**。组件内状态统一 `useAction`（`src/hooks/useAction.ts`，
   immer draft + 显式 Action 类型，配套 `defineActionHandler`）
+- action 按**业务语义**设计，**不要机械地为每个 state 字段配一个 set 方法**：
+  - 一个 action 可以同时收敛多个字段（如 `resetTaskForm` 清空描述+依赖、
+    `startSubmit` 同时置 busy 并清 error、`runStatus` 置状态时顺带结束 streaming）
+  - 命名用动词短语：`toggleX` / `resetX` / `clearX` / `xxxAdded` /
+    `xxxStart|Fail`，而不是 `setXxx`
+  - 表单一组草稿字段可用一个 `editDraft(partial)` + 一个 `resetDraft`
 - 跨多组件共享用 `useCtx`（`createCtx` + `provider(Component, connect)`）
 - **全局**状态才用 `useAtom`（`createAtom`）；不要滥用
 
