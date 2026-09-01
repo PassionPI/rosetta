@@ -52,12 +52,13 @@ export default function App() {
   if (me.isError || me.data === undefined) return <Login />;
 
   const seg = route.replace(/^#/, "").split("/").filter(Boolean);
+  const isTaskRoute = seg[0] === "task" && !!seg[1];
 
   let page: React.ReactNode;
   if (seg[0] === "session" && seg[1]) page = <SessionView sessionId={seg[1]} />;
   else if (seg[0] === "projects") page = <ProjectBoard />;
   else if (seg[0] === "repo" && seg[1]) page = <ProjectBoard repoId={Number(seg[1])} />;
-  else if (seg[0] === "task" && seg[1]) page = <TaskReview taskId={Number(seg[1])} />;
+  else if (isTaskRoute) page = <TaskReview taskId={Number(seg[1])} />;
   else page = <SessionList />;
 
   return (
@@ -81,7 +82,8 @@ export default function App() {
           </nav>
         </div>
       </header>
-      <main className="mx-auto max-w-5xl px-4 pb-16 pt-5">{page}</main>
+      {/* 任务页全幅左右布局（md 需求 #7），其余页面常规容器 */}
+      <main className={isTaskRoute ? "pb-0" : "mx-auto max-w-5xl px-4 pb-16 pt-5"}>{page}</main>
     </div>
   );
 }

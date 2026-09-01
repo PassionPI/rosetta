@@ -5,7 +5,8 @@ import { repos, taskDeps, tasks, worktrees } from "../db/schema.ts";
 import { log } from "../util/log.ts";
 import { addWorktree, refreshWorktrees, registerRepo } from "../orchestrator/repo-service.ts";
 import { listReposWithWorktrees, listTaskDTOs, loadTaskDTO } from "../orchestrator/queries.ts";
-import { acceptTask, emitTask, nudgeTask, rejectTask } from "../orchestrator/task-runner.ts";
+import { acceptTask, completeTask, nudgeTask, rejectTask } from "../orchestrator/task-runner.ts";
+import { emitTask } from "../orchestrator/review-tool.ts";
 import { dispatch, recheckUnavailableSlots } from "../orchestrator/scheduler.ts";
 
 export async function orchestratorRoutes(app: FastifyInstance): Promise<void> {
@@ -96,11 +97,11 @@ export async function orchestratorRoutes(app: FastifyInstance): Promise<void> {
     return dto;
   });
 
+  /** 验收：commit message 由 AI 生成（不接受用户输入），然后 commit + push 当前分支 */
   app.post("/tasks/:id/accept", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const { commitMessage } = (req.body ?? {}) as { commitMessage?: string };
     try {
-      await acceptTask(Number(id), commitMessage);
+      await acceptTask(Number(id));
       return { ok: true };
     } catch (e) {
       return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) });
@@ -148,6 +149,38 @@ export async function orchestratorRoutes(app: FastifyInstance): Promise<void> {
     emitTask(row.id, "已取消（工作区未自动清理，请手动检查 git status）");
     dispatch(row.repoId).catch(() => {});
     return { ok: true };
+  });
+
+  /** 设置 repo 默认模型（task 会话派发时使用；空串清除） */
+  app.post("/repos/:id/model", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const { model } = (req.body ?? {}) as { model?: string };
+    const repo = db.select().from(repos).where(eq(repos.id, Number(id))).get();
+    if (!repo) return reply.code(404).send({ error: "repo 不存在" });
+    let settings: Record<string, unknown> = {};
+    try {
+      settings = repo.settings ? (JSON.parse(repo.settings as string) as Record<string, unknown>) : {};
+    } catch {
+      /* ignore */
+    }
+    if (model?.trim()) settings.defaultModel = model.trim();
+    else delete settings.defaultModel;
+    db.update(repos)
+      .set({ settings: JSON.stringify(settings) })
+      .where(eq(repos.id, repo.id))
+      .run();
+    return { ok: true, defaultModel: settings.defaultModel ?? null };
+  });
+
+  /** 人工标记完成：running → awaiting_review（agent 未调 submit_for_review 时） */
+  app.post("/tasks/:id/complete", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    try {
+      await completeTask(Number(id));
+      return { ok: true };
+    } catch (e) {
+      return reply.code(400).send({ error: e instanceof Error ? e.message : String(e) });
+    }
   });
 
   /** retry：failed → queued 重新排队（简化：不保证回到原 slot） */

@@ -1,7 +1,7 @@
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { SessionManager, type AgentSession, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { db } from "../db/index.ts";
-import { sessions } from "../db/schema.ts";
+import { sessions, tasks } from "../db/schema.ts";
 import { config } from "../config.ts";
 import { realpath } from "../util/git.ts";
 import { log } from "../util/log.ts";
@@ -11,6 +11,7 @@ import { writeQueue } from "../recorder/write-queue.ts";
 import { upsertProject } from "../sync/projects.ts";
 import { buildSession } from "./factory.ts";
 import { repairDanglingToolCalls } from "./repair.ts";
+import { submitForReviewTool } from "../orchestrator/review-tool.ts";
 
 export interface RegistryEntry {
   sessionId: string;
@@ -93,7 +94,17 @@ class Registry {
 
     const sm = SessionManager.open(row.filePath);
     repairDanglingToolCalls(sm);
-    const { session, modelFallbackMessage } = await buildSession({ cwd: row.cwd, sessionManager: sm });
+    // task 会话重建时必须补挂 submit_for_review（否则 idle dispose / 重启后工具消失）
+    const activeTask = db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(and(eq(tasks.sessionId, sessionId), inArray(tasks.status, ["running", "awaiting_review"])))
+      .get();
+    const { session, modelFallbackMessage } = await buildSession({
+      cwd: row.cwd,
+      sessionManager: sm,
+      customTools: activeTask ? [submitForReviewTool(activeTask.id)] : undefined,
+    });
     if (modelFallbackMessage) log.warn(`[registry] ${modelFallbackMessage}`);
 
     db.update(sessions)

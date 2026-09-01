@@ -233,8 +233,19 @@ export async function coreRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true, tokensBefore: result.tokensBefore };
   });
 
-  app.patch("/sessions/:id/name", async (req, reply) => {
+  /** 当前会话已加载的工具（前端查看功能） */
+  app.get("/sessions/:id/tools", async (req, reply) => {
     const { id } = req.params as { id: string };
+    const entry = await registry.acquire(id);
+    if (!entry) return reply.code(404).send({ error: "会话不存在" });
+    const tools = (entry.session.agent.state.tools as any[]).map((t) => ({
+      name: t.name ?? "?",
+      description: t.description ?? t.label ?? "",
+    }));
+    return tools;
+  });
+
+  app.patch("/sessions/:id/name", async (req, reply) => {    const { id } = req.params as { id: string };
     const { name } = (req.body ?? {}) as { name?: string };
     if (!name) return reply.code(400).send({ error: "name 必填" });
     const entry = await registry.acquire(id);

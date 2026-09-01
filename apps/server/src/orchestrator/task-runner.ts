@@ -1,45 +1,15 @@
-import { Type } from "typebox";
-import { defineTool, type AgentSession, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.ts";
 import { tasks, worktrees } from "../db/schema.ts";
 import { log } from "../util/log.ts";
 import { registry } from "../agent/registry.ts";
 import { recorder } from "../recorder/event-recorder.ts";
-import { wsHub } from "../ws/hub.ts";
 import { commitAndPush, withRepoLock } from "./git-ops.ts";
-import { getTaskRow, loadTaskDTO } from "./queries.ts";
-
-/**
- * 完成信号工具（md/08 §6，06-todo 已确认）：
- * agent 调用 submit_for_review 才进入待验收；run 结束未调用则保持 running。
- */
-export function submitForReviewTool(taskId: number): ToolDefinition {
-  return defineTool({
-    name: "submit_for_review",
-    label: "提交验收",
-    description: "任务完成时调用。summary 需说明：做了什么、改了哪些文件、如何验证。",
-    parameters: Type.Object({
-      summary: Type.String({ description: "完成摘要（做了什么/改了哪些文件/如何验证）" }),
-    }),
-    execute: async (_toolCallId, params) => {
-      markAwaitingReview(taskId, params.summary);
-      return { content: [{ type: "text", text: "已提交验收，等待用户确认后由系统统一 commit/push。" }], details: {} };
-    },
-  }) as ToolDefinition;
-}
-
-export function emitTask(taskId: number, note?: string): void {
-  const dto = loadTaskDTO(taskId);
-  if (dto) wsHub.taskUpdate(dto, note);
-}
-
-function markAwaitingReview(taskId: number, summary: string): void {
-  const row = getTaskRow(taskId);
-  if (!row || row.status !== "running") return;
-  db.update(tasks).set({ status: "awaiting_review", summary }).where(eq(tasks.id, taskId)).run();
-  emitTask(taskId, "task 已提交验收");
-}
+import { getTaskRow } from "./queries.ts";
+import { getRepoDefaultModel } from "./queries.ts";
+import { emitTask } from "./review-tool.ts";
+import { generateCommitMessageSafe } from "./commit-message.ts";
 
 /** watch：run 结束但未 submit → 保持 running + 提示（md/08 §4） */
 export function watchTaskRun(taskId: number, session: AgentSession): void {
@@ -50,13 +20,16 @@ export function watchTaskRun(taskId: number, session: AgentSession): void {
     setTimeout(() => {
       const row = getTaskRow(taskId);
       if (row?.status === "running") {
-        emitTask(taskId, "run 已结束但未调用 submit_for_review（可催促，或在会话里继续补充后验收）");
+        emitTask(taskId, "run 已结束但未调用 submit_for_review（可催促/人工标记完成，或继续对话后验收）");
       }
     }, 200);
   });
 }
 
-export function buildTaskPrompt(task: { description: string; worktreePath?: string | null; branch?: string | null }, depSummaries: string[]): string {
+export function buildTaskPrompt(
+  task: { description: string; worktreePath?: string | null; branch?: string | null },
+  depSummaries: string[],
+): string {
   const deps = depSummaries.length
     ? `前置任务均已完成并提交，摘要：\n${depSummaries.map((s) => `- ${s}`).join("\n")}\n`
     : "";
@@ -96,18 +69,32 @@ export async function rejectTask(taskId: number, feedback: string): Promise<void
   emitTask(taskId, "已返工");
 }
 
-/** 验收：git 流水线（md/08 §7）→ done → 释放 slot → dispatch */
-export async function acceptTask(taskId: number, commitMessage?: string): Promise<void> {
+/** 人工标记完成：agent 未调 submit_for_review 时手动进入待验收 */
+export async function completeTask(taskId: number): Promise<void> {
+  const row = getTaskRow(taskId);
+  if (!row || row.status !== "running") throw new Error("仅执行中的任务可人工标记完成");
+  db.update(tasks)
+    .set({ status: "awaiting_review", summary: row.summary ?? "（人工标记完成，待验收）" })
+    .where(eq(tasks.id, taskId))
+    .run();
+  emitTask(taskId, "人工标记完成，待验收");
+}
+
+/**
+ * 验收：commit message 由 AI 总结生成（不使用用户输入，md 需求 #5）→
+ * commit + push 当前分支 → done → 释放 slot → dispatch
+ */
+export async function acceptTask(taskId: number): Promise<void> {
   const row = getTaskRow(taskId);
   if (!row || row.status !== "awaiting_review" || !row.worktreePath) throw new Error("任务不在待验收状态");
-  const msg =
-    commitMessage?.trim() ||
-    `#${taskId} ${row.description.split("\n")[0].slice(0, 72)}`;
 
   db.update(tasks).set({ status: "finishing" }).where(eq(tasks.id, taskId)).run();
-  emitTask(taskId, "git 流水线执行中");
+  emitTask(taskId, "AI 生成 commit message 中");
   try {
     const wt = row.worktreePath;
+    const modelSpec = getRepoDefaultModel(row.repoId);
+    const msg = await generateCommitMessageSafe(wt, taskId, row.description, row.summary, modelSpec);
+    log.info(`[task] #${taskId} commit message: ${msg.split("\n")[0]}`);
     const { endCommit, pushError } = await withRepoLock(row.repoId, () => commitAndPush(wt, msg));
     db.update(tasks)
       .set({ status: "done", endCommit, finishedAt: Date.now(), error: pushError })

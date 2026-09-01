@@ -68,4 +68,18 @@
   kbd {
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
   }
+  /* 鼠标指针提示（md 需求 #6） */
+  button:not(:disabled),
+  [role="button"]:not(:disabled),
+  summary,
+  select:not(:disabled) {
+    cursor: pointer;
+  }
+  button:disabled,
+  [role="button"]:disabled,
+  select:disabled,
+  input:disabled,
+  textarea:disabled {
+    cursor: not-allowed;
+  }
 }

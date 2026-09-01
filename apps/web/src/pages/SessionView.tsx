@@ -1,11 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CircleStop, CornerDownLeft, Send } from "lucide-react";
-import type { EntryDTO, ModelInfo, SessionSummary } from "@rossetta/shared";
+import { ArrowLeft, CircleStop, Send, Wrench } from "lucide-react";
+import type { EntryDTO, ModelInfo, SessionSummary, ToolInfo } from "@rossetta/shared";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -70,7 +79,9 @@ function EntryView({ e }: { e: EntryDTO }) {
     }
     if (m.role === "toolResult") {
       return (
-        <details className={`mr-auto max-w-[86%] text-xs ${m.isError ? "text-destructive" : "text-muted-foreground"}`}>
+        <details
+          className={`mr-auto max-w-[86%] text-xs ${m.isError ? "text-destructive" : "text-muted-foreground"}`}
+        >
           <summary className="cursor-pointer select-none">
             <code>{m.toolName}</code> {m.isError ? "✖" : "✓"}
           </summary>
@@ -95,11 +106,18 @@ function EntryView({ e }: { e: EntryDTO }) {
   return null;
 }
 
-export default function SessionView({ sessionId }: { sessionId: string }) {
+export default function SessionView({
+  sessionId,
+  embedded = false,
+}: {
+  sessionId: string;
+  embedded?: boolean;
+}) {
   const queryClient = useQueryClient();
   const [streaming, setStreaming] = useState("");
   const [runStatus, setRunStatus] = useState<string | null>(null);
   const [input, setInput] = useState("");
+  const [toolsOpen, setToolsOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const session = useQuery({
@@ -109,6 +127,11 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   const entries = useQuery({
     queryKey: ["entries", sessionId],
     queryFn: () => api.get<EntryDTO[]>(`/api/sessions/${sessionId}/entries`),
+  });
+  const tools = useQuery({
+    queryKey: ["tools", sessionId],
+    queryFn: () => api.get<ToolInfo[]>(`/api/sessions/${sessionId}/tools`),
+    enabled: toolsOpen,
   });
 
   useEffect(() => {
@@ -129,7 +152,11 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
       const ev = msg.event as any;
       if (ev.type === "message_update" && ev.assistantMessageEvent?.type === "text_delta") {
         setStreaming((s) => s + ev.assistantMessageEvent.delta);
-      } else if (ev.type === "message_end" || ev.type === "agent_end" || ev.type === "entry_appended") {
+      } else if (
+        ev.type === "message_end" ||
+        ev.type === "agent_end" ||
+        ev.type === "entry_appended"
+      ) {
         setStreaming("");
         refetchTimer ??= setTimeout(() => {
           refetchTimer = null;
@@ -154,7 +181,8 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     mutationFn: async (behavior?: "steer" | "followUp") => {
       if (!input.trim()) return;
       if (behavior === "steer") await api.post(`/api/sessions/${sessionId}/steer`, { text: input.trim() });
-      else if (behavior === "followUp") await api.post(`/api/sessions/${sessionId}/followup`, { text: input.trim() });
+      else if (behavior === "followUp")
+        await api.post(`/api/sessions/${sessionId}/followup`, { text: input.trim() });
       else await api.post(`/api/sessions/${sessionId}/prompt`, { text: input.trim() });
     },
     onSuccess: () => setInput(""),
@@ -177,13 +205,17 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   const currentSpec = s?.provider && s?.modelId ? `${s.provider}/${s.modelId}` : "";
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-3">
+    <div className={embedded ? "flex h-full min-w-0 flex-col gap-2 p-3" : "mx-auto flex max-w-3xl flex-col gap-3"}>
       <div className="flex flex-wrap items-center gap-2.5">
-        <Button variant="ghost" size="sm" onClick={() => (location.hash = "#/sessions")}>
-          <ArrowLeft className="size-4" /> 返回
-        </Button>
-        <h2 className="text-base font-semibold">{s?.name || s?.id?.slice(0, 8) || "…"}</h2>
-        <div className="w-60">
+        {!embedded && (
+          <Button variant="ghost" size="sm" onClick={() => (location.hash = "#/sessions")}>
+            <ArrowLeft className="size-4" /> 返回
+          </Button>
+        )}
+        {embedded && (
+          <h2 className="truncate text-sm font-semibold">{s?.name || s?.id?.slice(0, 8) || "…"}</h2>
+        )}
+        <div className="w-56">
           <Select
             value={setModel.isPending ? "__pending" : currentSpec || "__placeholder"}
             onValueChange={(v) => {
@@ -209,13 +241,40 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
             </SelectContent>
           </Select>
         </div>
+        <Dialog open={toolsOpen} onOpenChange={setToolsOpen}>
+          <DialogTrigger asChild>
+            <Button variant="outline" size="sm">
+              <Wrench className="size-4" />
+              工具{tools.data ? ` (${tools.data.length})` : ""}
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-h-[70vh] max-w-lg">
+            <DialogHeader>
+              <DialogTitle>已加载工具</DialogTitle>
+              <DialogDescription>当前会话暴露给模型的工具列表</DialogDescription>
+            </DialogHeader>
+            <ScrollArea className="max-h-[50vh] pr-3">
+              <div className="space-y-2">
+                {tools.isLoading && <p className="text-sm text-muted-foreground">加载中…</p>}
+                {(tools.data ?? []).map((t) => (
+                  <div key={t.name} className="rounded-lg border p-2.5">
+                    <code className="text-sm text-primary">{t.name}</code>
+                    <p className="mt-0.5 line-clamp-3 text-xs text-muted-foreground">
+                      {t.description || "（无描述）"}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          </DialogContent>
+        </Dialog>
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
           {isStreaming && (
             <Badge className="border-emerald-600/50 bg-emerald-600/10 text-emerald-400">
               ● streaming
             </Badge>
           )}
-          <code className="hidden truncate sm:inline">{s?.cwd}</code>
+          {!embedded && <code className="hidden truncate sm:inline">{s?.cwd}</code>}
           {s?.taskId && (
             <a
               href={`#/task/${s.taskId}`}
@@ -227,7 +286,13 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
         </div>
       </div>
 
-      <div className="flex h-[56vh] flex-col gap-2 overflow-y-auto rounded-lg border bg-black/10 p-3">
+      <div
+        className={
+          embedded
+            ? "flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto rounded-lg border bg-black/10 p-3"
+            : "flex h-[56vh] flex-col gap-2 overflow-y-auto rounded-lg border bg-black/10 p-3"
+        }
+      >
         {(entries.data ?? []).map((e) => (
           <EntryView key={e.id} e={e} />
         ))}
@@ -242,7 +307,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
         <div ref={bottomRef} />
       </div>
 
-      <Card>
+      <Card className={embedded ? "border-0 shadow-none" : undefined}>
         <CardContent className="flex flex-col gap-2 p-3">
           <Label htmlFor="composer" className="sr-only">
             消息
@@ -260,13 +325,28 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
           <div className="flex items-center gap-2">
             {isStreaming ? (
               <>
-                <Button size="sm" variant="secondary" disabled={!input.trim() || send.isPending} onClick={() => send.mutate("steer")}>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={!input.trim() || send.isPending}
+                  onClick={() => send.mutate("steer")}
+                >
                   插话 steer
                 </Button>
-                <Button size="sm" variant="secondary" disabled={!input.trim() || send.isPending} onClick={() => send.mutate("followUp")}>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={!input.trim() || send.isPending}
+                  onClick={() => send.mutate("followUp")}
+                >
                   排队 follow-up
                 </Button>
-                <Button size="sm" variant="destructive" disabled={abort.isPending} onClick={() => abort.mutate()}>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={abort.isPending}
+                  onClick={() => abort.mutate()}
+                >
                   <CircleStop className="size-4" /> 中止
                 </Button>
               </>

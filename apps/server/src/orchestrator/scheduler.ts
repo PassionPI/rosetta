@@ -5,8 +5,9 @@ import { log } from "../util/log.ts";
 import { registry } from "../agent/registry.ts";
 import { recorder } from "../recorder/event-recorder.ts";
 import { currentBranch, headCommit, worktreeIsDirty } from "./git-ops.ts";
-import { buildTaskPrompt, emitTask, submitForReviewTool, watchTaskRun } from "./task-runner.ts";
-import { depsOf } from "./queries.ts";
+import { buildTaskPrompt, watchTaskRun } from "./task-runner.ts";
+import { depsOf, getRepoDefaultModel } from "./queries.ts";
+import { emitTask, submitForReviewTool } from "./review-tool.ts";
 
 type TaskRow = typeof tasks.$inferSelect;
 type WorktreeRow = typeof worktrees.$inferSelect;
@@ -118,9 +119,12 @@ async function assign(task: TaskRow, slot: WorktreeRow): Promise<boolean> {
         .map((t) => `#${t.id} ${t.summary ?? t.description}`)
     : [];
 
+  // repo 默认模型（md 需求 #3）：未设置时用 pi 全局默认
+  const modelSpec = getRepoDefaultModel(task.repoId);
   const entry = await registry.create({
     cwd: slot.path,
     taskId: task.id,
+    modelSpec,
     customTools: [submitForReviewTool(task.id)],
   });
   const sessionId = entry.sessionId;

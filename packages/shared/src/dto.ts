@@ -86,7 +86,13 @@ export interface RepoDTO {
   id: number;
   repoRoot: string;
   displayName: string | null;
+  defaultModel: string | null;
   worktrees: WorktreeDTO[];
+}
+
+export interface ToolInfo {
+  name: string;
+  description: string;
 }
 
 export interface TaskDTO {

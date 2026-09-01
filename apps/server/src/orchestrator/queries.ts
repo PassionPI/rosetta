@@ -58,6 +58,20 @@ export function listTaskDTOs(repoId: number): TaskDTO[] {
 /** 占用 slot 的任务状态（md/08 §4） */
 const SLOT_HOLDING_STATUSES = ["running", "awaiting_review", "finishing"];
 
+export function getRepoSettings(repoId: number): { defaultModel?: string } {
+  const repo = db.select().from(repos).where(eq(repos.id, repoId)).get();
+  if (!repo?.settings) return {};
+  try {
+    return JSON.parse(repo.settings as string) as { defaultModel?: string };
+  } catch {
+    return {};
+  }
+}
+
+export function getRepoDefaultModel(repoId: number): string | undefined {
+  return getRepoSettings(repoId).defaultModel || undefined;
+}
+
 export function listReposWithWorktrees(): RepoDTO[] {
   const repoRows = db.select().from(repos).all();
   const holding = db
@@ -76,10 +90,17 @@ export function listReposWithWorktrees(): RepoDTO[] {
       .where(eq(worktrees.repoId, r.id))
       .orderBy(asc(worktrees.slotOrder))
       .all();
+    let defaultModel: string | null = null;
+    try {
+      defaultModel = r.settings ? (JSON.parse(r.settings as string) as { defaultModel?: string }).defaultModel ?? null : null;
+    } catch {
+      /* ignore */
+    }
     return {
       id: r.id,
       repoRoot: r.repoRoot,
       displayName: r.displayName ?? null,
+      defaultModel,
       worktrees: wts.map<WorktreeDTO>((w) => ({
         path: w.path,
         name: w.name,

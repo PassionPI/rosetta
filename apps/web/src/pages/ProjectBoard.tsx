@@ -1,10 +1,17 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { RepoDTO, TaskDTO } from "@rossetta/shared";
+import type { ModelInfo, RepoDTO, TaskDTO } from "@rossetta/shared";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -58,11 +65,34 @@ function RepoPanel({ repo }: { repo: RepoDTO }) {
   const [description, setDescription] = useState("");
   const [deps, setDeps] = useState<number[]>([]);
   const [wtName, setWtName] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
 
   const tasks = useQuery({
     queryKey: ["tasks", repo.id],
     queryFn: () => api.get<TaskDTO[]>(`/api/repos/${repo.id}/tasks`),
   });
+  const models = useQuery({
+    queryKey: ["models"],
+    queryFn: () => api.get<ModelInfo[]>("/api/models"),
+    staleTime: 60_000,
+  });
+
+  const setRepoModel = useMutation({
+    mutationFn: (m: string) =>
+      api.post(`/api/repos/${repo.id}/model`, { model: m === "__default" ? "" : m }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["repos"] }),
+  });
+
+  // 状态筛选（md 需求 #1）：全部 + 各状态计数
+  const counts = useMemo(() => {
+    const c = new Map<string, number>();
+    for (const t of tasks.data ?? []) c.set(t.status, (c.get(t.status) ?? 0) + 1);
+    return c;
+  }, [tasks.data]);
+  const filtered = useMemo(
+    () => (tasks.data ?? []).filter((t) => statusFilter === "all" || t.status === statusFilter),
+    [tasks.data, statusFilter],
+  );
 
   const addTask = useMutation({
     mutationFn: () =>
@@ -97,6 +127,7 @@ function RepoPanel({ repo }: { repo: RepoDTO }) {
   });
 
   const list = tasks.data ?? [];
+  const total = list.length;
 
   return (
     <Card>
@@ -105,9 +136,33 @@ function RepoPanel({ repo }: { repo: RepoDTO }) {
           {repo.displayName}{" "}
           <code className="ml-1 text-xs font-normal text-muted-foreground">{repo.repoRoot}</code>
         </CardTitle>
-        <Button variant="outline" size="sm" disabled={refresh.isPending} onClick={() => refresh.mutate()}>
-          刷新状态
-        </Button>
+        <div className="flex items-center gap-2">
+          <div className="w-56">
+            <Select
+              value={repo.defaultModel ?? "__default"}
+              onValueChange={(v) => setRepoModel.mutate(v)}
+              disabled={setRepoModel.isPending}
+            >
+              <SelectTrigger size="sm" className="w-full" title="task 派发使用的默认模型">
+                <SelectValue placeholder="repo 默认模型" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__default">默认模型（pi 设置）</SelectItem>
+                {(models.data ?? []).map((m) => {
+                  const spec = `${m.providerId}/${m.modelId}`;
+                  return (
+                    <SelectItem key={spec} value={spec}>
+                      {m.displayName}（{spec}）
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button variant="outline" size="sm" disabled={refresh.isPending} onClick={() => refresh.mutate()}>
+            刷新状态
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {/* slot 池 */}
@@ -142,6 +197,25 @@ function RepoPanel({ repo }: { repo: RepoDTO }) {
           </Button>
         </div>
 
+        {/* 状态筛选（md 需求 #1） */}
+        <div className="flex flex-wrap gap-1.5">
+          {[["all", `全部 ${total}`] as const, ...Object.keys(TASK_STATUS_LABEL).map((s) => [s, `${TASK_STATUS_LABEL[s]} ${counts.get(s) ?? 0}`] as const)].map(
+            ([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setStatusFilter(key)}
+                className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+                  statusFilter === key
+                    ? "border-primary/60 bg-primary/10 text-primary"
+                    : "border-border text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                }`}
+              >
+                {label}
+              </button>
+            ),
+          )}
+        </div>
+
         {/* 任务表 */}
         <Table>
           <TableHeader>
@@ -155,7 +229,7 @@ function RepoPanel({ repo }: { repo: RepoDTO }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {list.map((t) => (
+            {filtered.map((t) => (
               <TableRow key={t.id} className={t.status === "done" || t.status === "cancelled" ? "opacity-55" : ""}>
                 <TableCell>{t.seq}</TableCell>
                 <TableCell>
