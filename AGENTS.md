@@ -1,6 +1,6 @@
 # AGENTS.md
 
-rossetta — 基于 pi agent 的 web harness（TS server + Web UI）。
+rosetta — 基于 pi agent 的 web harness（TS server + Web UI）。
 
 - 设计文档：`md/`（架构、存储、生命周期、API、任务编排）
 - 结构与约定：`md/05-structure.md`；运维脚本：`script/`
@@ -14,6 +14,34 @@ rossetta — 基于 pi agent 的 web harness（TS server + Web UI）。
    `import styles from "./X.module.css"`，类名经模块哈希引用
 4. 全局只允许一个 `src/index.css`：Tailwind 指令（`@import "tailwindcss"`）、
    `@theme` / shadcn CSS variables、必要的 `@plugin` 声明——不放组件类
+
+## 前端架构规范（apps/web）
+
+### 路由
+
+- 统一使用 **@tanstack/react-router**（hash history），路由定义集中在 `src/router.tsx`，
+  页面组件在 `src/pages/`
+- 禁止手写 `location.hash` 跳转；用 `<Link to=... params=...>` / `useNavigate()`
+- 路由参数通过 `xxxRoute.useParams()` 获取
+
+### 状态
+
+- **禁止 `useState`**。组件内状态统一 `useAction`（`src/hooks/useAction.ts`，
+  immer draft + 显式 Action 类型，配套 `defineActionHandler`）
+- 跨多组件共享用 `useCtx`（`createCtx` + `provider(Component, connect)`）
+- **全局**状态才用 `useAtom`（`createAtom`）；不要滥用
+
+### 请求
+
+- 请求统一走 `src/lib/fx.ts`（tuple result + `.unwrap()`），禁止在组件内写裸
+  `fetch` / 手拼 URL
+- `src/api/client.ts` 用中间件创建全局 `fx` 实例（对象 body 自动补 JSON 头），
+  **API 定义处直接调用 `fx()`**，不再封装 apiGet/apiPost 之类的 helper
+- API 定义**集中在 `src/api/`**：每个函数显式标注输入输出类型
+  （`Input` / `Output` interface + shared DTO），按域拆文件（sessions / tasks /
+  repos / projects / auth）
+- 组件只负责 `import` + `call`：`queryFn: () => listSessions(cwd).unwrap()`
+- 服务端状态用 @tanstack/react-query 管理，不落本地 state
 
 ## 其他约定
 

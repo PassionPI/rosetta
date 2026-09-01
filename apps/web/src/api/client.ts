@@ -1,30 +1,20 @@
-import { ApiError } from "@/lib/fx.ts";
+import { createFetch } from "@/lib/fx.ts";
 
-async function request<T>(
-  method: string,
-  url: string,
-  body?: unknown,
-): Promise<T> {
-  const res = await fetch(url, {
-    method,
-    headers:
-      body !== undefined ? { "content-type": "application/json" } : undefined,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-    credentials: "same-origin",
-  });
-  if (res.status === 401) {
-    location.hash = "#/login";
-    throw new ApiError(401, "未登录");
-  }
-  if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new ApiError(res.status, data.error ?? `HTTP ${res.status}`);
-  }
-  return (await res.json()) as T;
-}
+const isPlainObject = (b: unknown): b is object =>
+  b != null &&
+  typeof b === "object" &&
+  !(b instanceof FormData) &&
+  !(b instanceof Blob) &&
+  !(b instanceof URLSearchParams) &&
+  !(b instanceof ArrayBuffer);
 
-export const api = {
-  get: <T>(url: string) => request<T>("GET", url),
-  post: <T>(url: string, body?: unknown) => request<T>("POST", url, body),
-  patch: <T>(url: string, body?: unknown) => request<T>("PATCH", url, body),
+/** 对象 body 自动补 application/json 头（api 层无需再传 headers） */
+const jsonHeader: Parameters<typeof createFetch>[0] = (ctx, next) => {
+  if (isPlainObject(ctx.body) && !ctx.headers.has("content-type")) {
+    ctx.headers.set("content-type", "application/json");
+  }
+  return next();
 };
+
+/** 全局请求器（lib/fx.ts，洋葱中间件 + tuple result），API 定义处直接调用 fx() */
+export const fx = createFetch(jsonHeader);

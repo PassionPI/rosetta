@@ -225,7 +225,12 @@ const baseFetch = async <
 const error: Middleware = (context, next) =>
   next().then(
     (result) => result,
-    (e) => [Error(e as string), null, { context, response: null }],
+    (e) =>
+      [Error(e as string), null, { context, response: null }] as [
+        Error,
+        null,
+        { context: Context; response: Response | null },
+      ],
   );
 
 export class ApiError extends Error {

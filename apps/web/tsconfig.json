@@ -5,7 +5,7 @@
     "jsx": "react-jsx",
     "paths": {
       "@/*": ["./src/*"],
-      "@rossetta/shared": ["../../packages/shared/src/index.ts"]
+      "@rosetta/shared": ["../../packages/shared/src/index.ts"]
     }
   },
   "include": ["src"]

@@ -1,7 +1,15 @@
-import { useEffect, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CircleStop, Send, Wrench } from "lucide-react";
-import type { EntryDTO, ModelInfo, SessionSummary, ToolInfo } from "@rossetta/shared";
+import { listModels } from "@/api/projects.ts";
+import {
+  abortSession,
+  followUpSession,
+  getSession,
+  listEntries,
+  listSessionTools,
+  promptSession,
+  setSessionModel,
+  steerSession,
+} from "@/api/sessions.ts";
+import Markdown from "@/components/Markdown.tsx";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -23,15 +31,21 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import Markdown from "../components/Markdown.tsx";
-import { api } from "../api/client.ts";
-import { wsClient } from "../ws/client.ts";
+import { defineActionHandler, useAction } from "@/hooks/useAction";
+import { wsClient } from "@/ws/client.ts";
+import type { EntryDTO, ModelInfo } from "@rosetta/shared";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
+import { ArrowLeft, CircleStop, Send, Wrench } from "lucide-react";
+import { useEffect, useRef } from "react";
 
 function textOf(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content
-    .map((c: any) => (c.type === "text" ? c.text : c.type === "image" ? "[图片]" : ""))
+    .map((c: any) =>
+      c.type === "text" ? c.text : c.type === "image" ? "[图片]" : "",
+    )
     .join("");
 }
 
@@ -48,8 +62,14 @@ function EntryView({ e }: { e: EntryDTO }) {
     }
     if (m.role === "assistant") {
       const parts: any[] = Array.isArray(m.content) ? m.content : [];
-      const thinking = parts.filter((c) => c.type === "thinking").map((c) => c.thinking).join("\n");
-      const text = parts.filter((c) => c.type === "text").map((c) => c.text).join("");
+      const thinking = parts
+        .filter((c) => c.type === "thinking")
+        .map((c) => c.thinking)
+        .join("\n");
+      const text = parts
+        .filter((c) => c.type === "text")
+        .map((c) => c.text)
+        .join("");
       const calls = parts.filter((c) => c.type === "toolCall");
       return (
         <div className="mr-auto max-w-[86%] space-y-2 rounded-xl border bg-card p-3 text-sm">
@@ -101,9 +121,28 @@ function EntryView({ e }: { e: EntryDTO }) {
     );
   }
   if (e.kind === "branch_summary") {
-    return <p className="text-center text-xs text-muted-foreground">⋯ 分支切换摘要</p>;
+    return (
+      <p className="text-center text-xs text-muted-foreground">
+        ⋯ 分支切换摘要
+      </p>
+    );
   }
   return null;
+}
+
+interface ViewState {
+  streaming: string;
+  runStatus: string | null;
+  input: string;
+  toolsOpen: boolean;
+}
+
+interface ViewActions {
+  appendDelta: string;
+  clearStreaming: null;
+  setRunStatus: string | null;
+  setInput: string;
+  setToolsOpen: boolean;
 }
 
 export default function SessionView({
@@ -114,24 +153,46 @@ export default function SessionView({
   embedded?: boolean;
 }) {
   const queryClient = useQueryClient();
-  const [streaming, setStreaming] = useState("");
-  const [runStatus, setRunStatus] = useState<string | null>(null);
-  const [input, setInput] = useState("");
-  const [toolsOpen, setToolsOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  const [state, actions] = useAction(
+    (): ViewState => ({
+      streaming: "",
+      runStatus: null,
+      input: "",
+      toolsOpen: false,
+    }),
+    defineActionHandler<ViewState, ViewActions>({
+      appendDelta: (s, delta) => {
+        s.streaming += delta;
+      },
+      clearStreaming: (s) => {
+        s.streaming = "";
+      },
+      setRunStatus: (s, v) => {
+        s.runStatus = v;
+      },
+      setInput: (s, v) => {
+        s.input = v;
+      },
+      setToolsOpen: (s, v) => {
+        s.toolsOpen = v;
+      },
+    }),
+  );
 
   const session = useQuery({
     queryKey: ["session", sessionId],
-    queryFn: () => api.get<SessionSummary & { streaming?: boolean }>(`/api/sessions/${sessionId}`),
+    queryFn: () => getSession(sessionId).unwrap(),
   });
   const entries = useQuery({
     queryKey: ["entries", sessionId],
-    queryFn: () => api.get<EntryDTO[]>(`/api/sessions/${sessionId}/entries`),
+    queryFn: () => listEntries(sessionId).unwrap(),
   });
   const tools = useQuery({
     queryKey: ["tools", sessionId],
-    queryFn: () => api.get<ToolInfo[]>(`/api/sessions/${sessionId}/tools`),
-    enabled: toolsOpen,
+    queryFn: () => listSessionTools(sessionId).unwrap(),
+    enabled: state.toolsOpen,
   });
 
   useEffect(() => {
@@ -144,24 +205,31 @@ export default function SessionView({
     const off = wsClient.on((msg) => {
       if (msg.kind === "event" && msg.sessionId !== sessionId) return;
       if (msg.kind === "run_status") {
-        setRunStatus(msg.status);
-        if (msg.status !== "running") setStreaming("");
+        actions.setRunStatus(msg.status);
+        if (msg.status !== "running") actions.clearStreaming();
         return;
       }
       if (msg.kind !== "event") return;
       const ev = msg.event as any;
-      if (ev.type === "message_update" && ev.assistantMessageEvent?.type === "text_delta") {
-        setStreaming((s) => s + ev.assistantMessageEvent.delta);
+      if (
+        ev.type === "message_update" &&
+        ev.assistantMessageEvent?.type === "text_delta"
+      ) {
+        actions.appendDelta(ev.assistantMessageEvent.delta);
       } else if (
         ev.type === "message_end" ||
         ev.type === "agent_end" ||
         ev.type === "entry_appended"
       ) {
-        setStreaming("");
+        actions.clearStreaming();
         refetchTimer ??= setTimeout(() => {
           refetchTimer = null;
-          void queryClient.invalidateQueries({ queryKey: ["entries", sessionId] });
-          void queryClient.invalidateQueries({ queryKey: ["session", sessionId] });
+          void queryClient.invalidateQueries({
+            queryKey: ["entries", sessionId],
+          });
+          void queryClient.invalidateQueries({
+            queryKey: ["session", sessionId],
+          });
         }, 300);
       }
     });
@@ -169,57 +237,79 @@ export default function SessionView({
       off();
       if (refetchTimer) clearTimeout(refetchTimer);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- actions 来自 useAction，引用稳定
   }, [sessionId, queryClient]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [entries.dataUpdatedAt, streaming]);
+  }, [entries.dataUpdatedAt, state.streaming]);
 
-  const isStreaming = runStatus === "running" || session.data?.streaming === true;
+  const isStreaming =
+    state.runStatus === "running" || session.data?.streaming === true;
 
   const send = useMutation({
     mutationFn: async (behavior?: "steer" | "followUp") => {
-      if (!input.trim()) return;
-      if (behavior === "steer") await api.post(`/api/sessions/${sessionId}/steer`, { text: input.trim() });
+      const text = state.input.trim();
+      if (!text) return;
+      if (behavior === "steer")
+        await steerSession(sessionId, { text }).unwrap();
       else if (behavior === "followUp")
-        await api.post(`/api/sessions/${sessionId}/followup`, { text: input.trim() });
-      else await api.post(`/api/sessions/${sessionId}/prompt`, { text: input.trim() });
+        await followUpSession(sessionId, { text }).unwrap();
+      else await promptSession(sessionId, { text }).unwrap();
     },
-    onSuccess: () => setInput(""),
+    onSuccess: () => actions.setInput(""),
   });
 
-  const abort = useMutation({ mutationFn: () => api.post(`/api/sessions/${sessionId}/abort`) });
+  const abort = useMutation({
+    mutationFn: () => abortSession(sessionId).unwrap(),
+  });
 
   // 模型切换
   const models = useQuery({
     queryKey: ["models"],
-    queryFn: () => api.get<ModelInfo[]>("/api/models"),
+    queryFn: () => listModels().unwrap(),
     staleTime: 60_000,
   });
   const setModel = useMutation({
-    mutationFn: (spec: string) => api.post(`/api/sessions/${sessionId}/model`, { model: spec }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["session", sessionId] }),
+    mutationFn: (spec: string) =>
+      setSessionModel(sessionId, { model: spec }).unwrap(),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["session", sessionId] }),
   });
 
   const s = session.data;
-  const currentSpec = s?.provider && s?.modelId ? `${s.provider}/${s.modelId}` : "";
+  const currentSpec =
+    s?.provider && s?.modelId ? `${s.provider}/${s.modelId}` : "";
 
   return (
-    <div className={embedded ? "flex h-full min-w-0 flex-col gap-2 p-3" : "mx-auto flex max-w-3xl flex-col gap-3"}>
+    <div
+      className={
+        embedded
+          ? "flex h-full min-w-0 flex-col gap-2 p-3"
+          : "mx-auto flex max-w-3xl flex-col gap-3"
+      }
+    >
       <div className="flex flex-wrap items-center gap-2.5">
         {!embedded && (
-          <Button variant="ghost" size="sm" onClick={() => (location.hash = "#/sessions")}>
-            <ArrowLeft className="size-4" /> 返回
+          <Button variant="ghost" size="sm" asChild>
+            <Link to="/sessions">
+              <ArrowLeft className="size-4" /> 返回
+            </Link>
           </Button>
         )}
         {embedded && (
-          <h2 className="truncate text-sm font-semibold">{s?.name || s?.id?.slice(0, 8) || "…"}</h2>
+          <h2 className="truncate text-sm font-semibold">
+            {s?.name || s?.id?.slice(0, 8) || "…"}
+          </h2>
         )}
         <div className="w-56">
           <Select
-            value={setModel.isPending ? "__pending" : currentSpec || "__placeholder"}
+            value={
+              setModel.isPending ? "__pending" : currentSpec || "__placeholder"
+            }
             onValueChange={(v) => {
-              if (v !== "__placeholder" && v !== "__pending") setModel.mutate(v);
+              if (v !== "__placeholder" && v !== "__pending")
+                setModel.mutate(v);
             }}
             disabled={setModel.isPending}
           >
@@ -230,7 +320,7 @@ export default function SessionView({
               <SelectItem value="__placeholder" disabled>
                 {setModel.isPending ? "切换中…" : (s?.modelId ?? "模型")}
               </SelectItem>
-              {(models.data ?? []).map((m) => {
+              {(models.data ?? []).map((m: ModelInfo) => {
                 const spec = `${m.providerId}/${m.modelId}`;
                 return (
                   <SelectItem key={spec} value={spec}>
@@ -241,7 +331,7 @@ export default function SessionView({
             </SelectContent>
           </Select>
         </div>
-        <Dialog open={toolsOpen} onOpenChange={setToolsOpen}>
+        <Dialog open={state.toolsOpen} onOpenChange={actions.setToolsOpen}>
           <DialogTrigger asChild>
             <Button variant="outline" size="sm">
               <Wrench className="size-4" />
@@ -251,11 +341,15 @@ export default function SessionView({
           <DialogContent className="max-h-[70vh] max-w-lg">
             <DialogHeader>
               <DialogTitle>已加载工具</DialogTitle>
-              <DialogDescription>当前会话暴露给模型的工具列表</DialogDescription>
+              <DialogDescription>
+                当前会话暴露给模型的工具列表
+              </DialogDescription>
             </DialogHeader>
             <ScrollArea className="max-h-[50vh] pr-3">
               <div className="space-y-2">
-                {tools.isLoading && <p className="text-sm text-muted-foreground">加载中…</p>}
+                {tools.isLoading && (
+                  <p className="text-sm text-muted-foreground">加载中…</p>
+                )}
                 {(tools.data ?? []).map((t) => (
                   <div key={t.name} className="rounded-lg border p-2.5">
                     <code className="text-sm text-primary">{t.name}</code>
@@ -274,14 +368,17 @@ export default function SessionView({
               ● streaming
             </Badge>
           )}
-          {!embedded && <code className="hidden truncate sm:inline">{s?.cwd}</code>}
+          {!embedded && (
+            <code className="hidden truncate sm:inline">{s?.cwd}</code>
+          )}
           {s?.taskId && (
-            <a
-              href={`#/task/${s.taskId}`}
+            <Link
+              to="/task/$taskId"
+              params={{ taskId: String(s.taskId) }}
               className="rounded border border-amber-500/50 px-1.5 py-px text-amber-400"
             >
               task #{s.taskId}
-            </a>
+            </Link>
           )}
         </div>
       </div>
@@ -296,13 +393,15 @@ export default function SessionView({
         {(entries.data ?? []).map((e) => (
           <EntryView key={e.id} e={e} />
         ))}
-        {streaming && (
+        {state.streaming && (
           <div className="mr-auto max-w-[86%] rounded-xl border border-dashed border-primary/50 bg-card p-3 text-sm">
-            <Markdown>{streaming}</Markdown>
+            <Markdown>{state.streaming}</Markdown>
           </div>
         )}
-        {(entries.data ?? []).length === 0 && !streaming && (
-          <p className="m-auto text-sm text-muted-foreground">空会话，发送第一条消息开始</p>
+        {(entries.data ?? []).length === 0 && !state.streaming && (
+          <p className="m-auto text-sm text-muted-foreground">
+            空会话，发送第一条消息开始
+          </p>
         )}
         <div ref={bottomRef} />
       </div>
@@ -315,9 +414,13 @@ export default function SessionView({
           <Textarea
             id="composer"
             className="min-h-20"
-            placeholder={isStreaming ? "正在生成… 可插话（steer）或排队（follow-up）" : "输入消息…"}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
+            placeholder={
+              isStreaming
+                ? "正在生成… 可插话（steer）或排队（follow-up）"
+                : "输入消息…"
+            }
+            value={state.input}
+            onChange={(e) => actions.setInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send.mutate();
             }}
@@ -328,7 +431,7 @@ export default function SessionView({
                 <Button
                   size="sm"
                   variant="secondary"
-                  disabled={!input.trim() || send.isPending}
+                  disabled={!state.input.trim() || send.isPending}
                   onClick={() => send.mutate("steer")}
                 >
                   插话 steer
@@ -336,7 +439,7 @@ export default function SessionView({
                 <Button
                   size="sm"
                   variant="secondary"
-                  disabled={!input.trim() || send.isPending}
+                  disabled={!state.input.trim() || send.isPending}
                   onClick={() => send.mutate("followUp")}
                 >
                   排队 follow-up
@@ -351,12 +454,22 @@ export default function SessionView({
                 </Button>
               </>
             ) : (
-              <Button size="sm" disabled={!input.trim() || send.isPending} onClick={() => send.mutate()}>
+              <Button
+                size="sm"
+                disabled={!state.input.trim() || send.isPending}
+                onClick={() => send.mutate()}
+              >
                 <Send className="size-4" /> 发送
-                <kbd className="ml-1 rounded bg-black/30 px-1 text-[10px]">⌘↵</kbd>
+                <kbd className="ml-1 rounded bg-black/30 px-1 text-[10px]">
+                  ⌘↵
+                </kbd>
               </Button>
             )}
-            {send.isError && <span className="text-xs text-destructive">{String(send.error)}</span>}
+            {send.isError && (
+              <span className="text-xs text-destructive">
+                {String(send.error)}
+              </span>
+            )}
           </div>
         </CardContent>
       </Card>
