@@ -14,8 +14,13 @@ const TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** HMAC 签名 token：base64url(payload).base64url(mac) */
 export function issueToken(): string {
-  const body = Buffer.from(JSON.stringify({ exp: Date.now() + TTL_MS })).toString("base64url");
-  const mac = crypto.createHmac("sha256", secret).update(body).digest("base64url");
+  const body = Buffer.from(
+    JSON.stringify({ exp: Date.now() + TTL_MS }),
+  ).toString("base64url");
+  const mac = crypto
+    .createHmac("sha256", secret)
+    .update(body)
+    .digest("base64url");
   return `${body}.${mac}`;
 }
 
@@ -30,9 +35,12 @@ export function verifyToken(token: string | undefined): boolean {
   } catch {
     return false;
   }
-  if (expect.length !== got.length || !crypto.timingSafeEqual(expect, got)) return false;
+  if (expect.length !== got.length || !crypto.timingSafeEqual(expect, got))
+    return false;
   try {
-    const { exp } = JSON.parse(Buffer.from(body, "base64url").toString()) as { exp: number };
+    const { exp } = JSON.parse(Buffer.from(body, "base64url").toString()) as {
+      exp: number;
+    };
     return Date.now() < exp;
   } catch {
     return false;
@@ -49,7 +57,7 @@ export function checkPassword(input: string): boolean {
 
 export function isAuthed(cookieHeader: string | undefined): boolean {
   if (!cookieHeader) return false;
-  const m = /(?:^|;\s*)rossetta_session=([^;]+)/.exec(cookieHeader);
+  const m = /(?:^|;\s*)rosetta_session=([^;]+)/.exec(cookieHeader);
   return verifyToken(m?.[1]);
 }
 

@@ -48,7 +48,9 @@ export default function Login() {
     const [err] = await login({ password: state.password });
     if (err) {
       actions.failSubmit(
-        err instanceof ApiError && err.status === 401 ? "密码错误" : err.message,
+        err instanceof ApiError && err.status === 401
+          ? "密码错误"
+          : err.message,
       );
       return;
     }
@@ -60,7 +62,7 @@ export default function Login() {
     <div className="flex min-h-screen items-center justify-center px-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle className="tracking-widest">rosetta</CardTitle>
+          <CardTitle className="tracking-widest">Rosetta</CardTitle>
         </CardHeader>
         <CardContent>
           <form className="flex flex-col gap-3" onSubmit={submit}>

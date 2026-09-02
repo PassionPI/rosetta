@@ -175,3 +175,23 @@ export const taskDeps = sqliteTable(
   },
   (t) => [index("idx_task_deps_task").on(t.taskId)],
 );
+
+// ── 通知中心（md 需求 #8：需用户确认/知悉的事件）──
+export const notifications = sqliteTable(
+  "notifications",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    type: text("type").notNull(),
+    title: text("title").notNull(),
+    detail: text("detail"),
+    taskId: integer("task_id"),
+    sessionId: text("session_id"),
+    repoId: integer("repo_id"),
+    read: integer("read", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at"),
+  },
+  (t) => [
+    index("idx_notifications_read").on(t.read, t.createdAt),
+    index("idx_notifications_task").on(t.taskId),
+  ],
+);

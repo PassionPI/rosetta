@@ -1,13 +1,15 @@
 import type { FastifyInstance } from "fastify";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../db/index.ts";
 import { repos, taskDeps, tasks, worktrees } from "../db/schema.ts";
 import { log } from "../util/log.ts";
+import { registry } from "../agent/registry.ts";
 import { addWorktree, refreshWorktrees, registerRepo } from "../orchestrator/repo-service.ts";
 import { listReposWithWorktrees, listTaskDTOs, loadTaskDTO } from "../orchestrator/queries.ts";
 import { acceptTask, completeTask, nudgeTask, rejectTask } from "../orchestrator/task-runner.ts";
 import { emitTask } from "../orchestrator/review-tool.ts";
-import { dispatch, recheckUnavailableSlots } from "../orchestrator/scheduler.ts";
+import { dispatch, forceAssignToWorktree, recheckUnavailableSlots } from "../orchestrator/scheduler.ts";
+import { realpath } from "../util/git.ts";
 
 export async function orchestratorRoutes(app: FastifyInstance): Promise<void> {
   // ── repos / worktree 池 ──
@@ -97,11 +99,12 @@ export async function orchestratorRoutes(app: FastifyInstance): Promise<void> {
     return dto;
   });
 
-  /** 验收：commit message 由 AI 生成（不接受用户输入），然后 commit + push 当前分支 */
+  /** 验收：commit=true（默认）AI 生成 message + commit + push；false 仅标记通过不动工作区 */
   app.post("/tasks/:id/accept", async (req, reply) => {
     const { id } = req.params as { id: string };
+    const { commit } = (req.body ?? {}) as { commit?: boolean };
     try {
-      await acceptTask(Number(id));
+      await acceptTask(Number(id), { commit: commit !== false });
       return { ok: true };
     } catch (e) {
       return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) });
@@ -130,25 +133,77 @@ export async function orchestratorRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  /** cancel：标记取消，不自动清理工作区（md/08 §7）；释放 slot */
+  /** cancel：除 done 外任意状态可取消（md 需求 #4）；running 时同时中止会话；不清理工作区 */
   app.post("/tasks/:id/cancel", async (req, reply) => {
     const { id } = req.params as { id: string };
     const row = db.select().from(tasks).where(eq(tasks.id, Number(id))).get();
     if (!row) return reply.code(404).send({ error: "任务不存在" });
-    if (row.status === "done") return reply.code(400).send({ error: "任务已完成" });
+    if (row.status === "done") return reply.code(400).send({ error: "任务已完成，无法取消" });
+    if (row.status === "cancelled") return { ok: true };
+
+    // running → 中止进行中的 LLM run
+    if (row.status === "running" && row.sessionId) {
+      const entry = await registry.acquire(row.sessionId).catch(() => null);
+      if (entry?.session.isStreaming) await entry.session.abort().catch(() => {});
+    }
+
     db.update(tasks)
       .set({ status: "cancelled", finishedAt: Date.now() })
       .where(eq(tasks.id, row.id))
       .run();
     if (row.worktreePath) {
+      // 仅 busy 时释放，避免覆盖用户 reserved 占用
       db.update(worktrees)
         .set({ status: "idle", updatedAt: Date.now() })
-        .where(eq(worktrees.path, row.worktreePath))
+        .where(and(eq(worktrees.path, row.worktreePath), eq(worktrees.status, "busy")))
         .run();
     }
     emitTask(row.id, "已取消（工作区未自动清理，请手动检查 git status）");
     dispatch(row.repoId).catch(() => {});
     return { ok: true };
+  });
+
+  /** 强制派发（md 需求 #7）：dirty 的 worktree 上执行排队任务 */
+  app.post("/tasks/:id/dispatch", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const { worktreePath } = (req.body ?? {}) as { worktreePath?: string };
+    if (!worktreePath) return reply.code(400).send({ error: "worktreePath 必填" });
+    try {
+      await forceAssignToWorktree(Number(id), worktreePath);
+      return { ok: true };
+    } catch (e) {
+      return reply.code(400).send({ error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  /** slot 占用/释放（md 需求 #6）：reserved 状态不参与派发 */
+  app.post("/repos/:id/worktrees/reserve", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const { path, reserved } = (req.body ?? {}) as { path?: string; reserved?: boolean };
+    if (!path) return reply.code(400).send({ error: "path 必填" });
+    // 入库统一 realpath，避免 symlink 路径（如 /tmp → /private/tmp）查不到
+    let wtPath: string;
+    try {
+      wtPath = realpath(path);
+    } catch {
+      return reply.code(404).send({ error: "路径不存在" });
+    }
+    const wt = db.select().from(worktrees).where(eq(worktrees.path, wtPath)).get();
+    if (!wt || wt.repoId !== Number(id)) return reply.code(404).send({ error: "worktree 不存在" });
+    if (reserved) {
+      if (wt.status === "busy") return reply.code(400).send({ error: "该 worktree 正在执行任务" });
+      db.update(worktrees)
+        .set({ status: "reserved", updatedAt: Date.now() })
+        .where(eq(worktrees.path, wtPath))
+        .run();
+    } else {
+      if (wt.status !== "reserved") return reply.code(400).send({ error: "该 worktree 未被占用" });
+      db.update(worktrees)
+        .set({ status: "idle", updatedAt: Date.now() })
+        .where(eq(worktrees.path, wtPath))
+        .run();
+    }
+    return { ok: true, status: reserved ? "reserved" : "idle" };
   });
 
   /** 设置 repo 默认模型（task 会话派发时使用；空串清除） */

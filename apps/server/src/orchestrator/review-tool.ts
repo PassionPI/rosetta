@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/index.ts";
 import { tasks } from "../db/schema.ts";
 import { wsHub } from "../ws/hub.ts";
+import { notify } from "../notify/notify.ts";
 import { loadTaskDTO, getTaskRow } from "./queries.ts";
 
 export function emitTask(taskId: number, note?: string): void {
@@ -41,5 +42,16 @@ function markAwaitingReview(taskId: number, summary: string): void {
   // running → awaiting_review 首次提交；awaiting_review → 更新摘要（重复调用）
   if (row.status !== "running" && row.status !== "awaiting_review") return;
   db.update(tasks).set({ status: "awaiting_review", summary }).where(eq(tasks.id, taskId)).run();
-  emitTask(taskId, row.status === "awaiting_review" ? "已更新验收摘要" : "已提交验收");
+  const first = row.status === "running";
+  emitTask(taskId, first ? "已提交验收" : "已更新验收摘要");
+  if (first) {
+    notify({
+      type: "awaiting_review",
+      title: `任务 #${taskId} 待验收`,
+      detail: summary.slice(0, 200),
+      taskId,
+      repoId: row.repoId,
+      sessionId: row.sessionId ?? undefined,
+    });
+  }
 }

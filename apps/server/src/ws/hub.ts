@@ -1,4 +1,4 @@
-import type { TaskDTO, WsServerMessage } from "@rosetta/shared";
+import type { NotificationDTO, TaskDTO, WsServerMessage } from "@rosetta/shared";
 import type { WebSocket } from "ws";
 
 interface Client {
@@ -63,6 +63,22 @@ class Hub {
   /** 任务状态变化：全局广播 */
   taskUpdate(task: TaskDTO, note?: string): void {
     const msg: WsServerMessage = { kind: "task_update", task, note };
+    for (const c of this.clients) this.send(c, msg);
+  }
+
+  /** 验收 git 流水线进度（全局广播） */
+  taskProgress(
+    taskId: number,
+    stage: "generating_commit_message" | "committing" | "pushing" | "done" | "failed",
+    detail?: string,
+  ): void {
+    const msg: WsServerMessage = { kind: "task_progress", taskId, stage, detail };
+    for (const c of this.clients) this.send(c, msg);
+  }
+
+  /** 通知中心新通知（全局广播） */
+  notification(n: NotificationDTO): void {
+    const msg: WsServerMessage = { kind: "notification", notification: n };
     for (const c of this.clients) this.send(c, msg);
   }
 

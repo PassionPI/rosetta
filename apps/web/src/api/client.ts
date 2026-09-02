@@ -1,4 +1,4 @@
-import { createFetch } from "@/lib/fx.ts";
+import { createFetch, Middleware } from "@/lib/fx.ts";
 
 const isPlainObject = (b: unknown): b is object =>
   b != null &&
@@ -9,7 +9,7 @@ const isPlainObject = (b: unknown): b is object =>
   !(b instanceof ArrayBuffer);
 
 /** 对象 body 自动补 application/json 头（api 层无需再传 headers） */
-const jsonHeader: Parameters<typeof createFetch>[0] = (ctx, next) => {
+const jsonHeader: Middleware = (ctx, next) => {
   if (isPlainObject(ctx.body) && !ctx.headers.has("content-type")) {
     ctx.headers.set("content-type", "application/json");
   }

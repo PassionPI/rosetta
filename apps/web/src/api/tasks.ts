@@ -23,9 +23,13 @@ export const createTask = (repoId: number, input: CreateTaskInput) =>
 export const getTask = (taskId: number) =>
   fx<TaskDTO>({ url: `/api/tasks/${taskId}` });
 
-/** commit message 由 AI 生成 */
-export const acceptTask = (taskId: number) =>
-  fx<OkOutput>({ url: `/api/tasks/${taskId}/accept`, method: "POST" });
+/** 验收：commit=true（默认）AI 生成 message + commit + push；false 仅标记通过 */
+export const acceptTask = (taskId: number, input?: { commit?: boolean }) =>
+  fx<OkOutput>({ url: `/api/tasks/${taskId}/accept`, method: "POST", body: input ?? {} });
+
+/** 强制派发到指定 worktree（忽略未提交改动） */
+export const dispatchTask = (taskId: number, input: { worktreePath: string }) =>
+  fx<OkOutput>({ url: `/api/tasks/${taskId}/dispatch`, method: "POST", body: input });
 
 export const rejectTask = (taskId: number, input: { feedback: string }) =>
   fx<OkOutput>({

@@ -9,7 +9,7 @@ import { recorder } from "../recorder/event-recorder.ts";
 import { wsHub } from "../ws/hub.ts";
 import { writeQueue } from "../recorder/write-queue.ts";
 import { upsertProject } from "../sync/projects.ts";
-import { buildSession } from "./factory.ts";
+import { buildSession, resolveModelSpec } from "./factory.ts";
 import { repairDanglingToolCalls } from "./repair.ts";
 import { submitForReviewTool } from "../orchestrator/review-tool.ts";
 
@@ -106,6 +106,20 @@ class Registry {
       customTools: activeTask ? [submitForReviewTool(activeTask.id)] : undefined,
     });
     if (modelFallbackMessage) log.warn(`[registry] ${modelFallbackMessage}`);
+
+    // 模型一致性（切模型不生效的根因之一）：pi 恢复失败会静默回退默认模型，
+    // 以 DB 记录（用户显式切换过的目标模型）为准重设
+    if (row.provider && row.modelId && session.model && session.model.id !== row.modelId) {
+      try {
+        const { model } = await resolveModelSpec(`${row.provider}/${row.modelId}`);
+        await session.setModel(model);
+        log.warn(
+          `[registry] ${sessionId} 模型恢复回退为 ${session.model.id}，已按 DB 重设为 ${row.modelId}`,
+        );
+      } catch (e) {
+        log.warn(`[registry] ${sessionId} 模型重设失败:`, e);
+      }
+    }
 
     db.update(sessions)
       .set({ name: session.sessionName ?? row.name, updatedAt: Date.now() })

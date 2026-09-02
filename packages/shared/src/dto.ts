@@ -78,8 +78,22 @@ export interface WorktreeDTO {
   isMain: boolean;
   branch: string | null;
   slotOrder: number;
+  /** idle | busy | unavailable | reserved（用户手动占用）| disabled */
   status: string;
   currentTaskId: number | null;
+}
+
+export interface NotificationDTO {
+  id: number;
+  /** awaiting_review | run_stopped | task_done | task_failed | dispatch_blocked | dispatch_skipped */
+  type: string;
+  title: string;
+  detail: string | null;
+  taskId: number | null;
+  sessionId: string | null;
+  repoId: number | null;
+  read: boolean;
+  createdAt: number | null;
 }
 
 export interface RepoDTO {

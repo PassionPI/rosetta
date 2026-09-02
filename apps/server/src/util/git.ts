@@ -28,8 +28,8 @@ export function realpath(p: string): string {
 /** 是否为 git 仓库（且返回 toplevel） */
 export async function gitTopLevel(p: string): Promise<string | null> {
   try {
-    const top = (await git(["rev-parse", "--show-toplevel"], p)).trim();
-    return top || null;
+    const top = await git(["rev-parse", "--show-toplevel"], p);
+    return top.trim() || null;
   } catch {
     return null;
   }

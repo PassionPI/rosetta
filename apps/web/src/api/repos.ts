@@ -41,3 +41,16 @@ export const setRepoModel = (repoId: number, input: SetRepoModelInput) =>
     method: "POST",
     body: input,
   });
+
+export interface ReserveWorktreeInput {
+  path: string;
+  /** true 占用（不参与派发）；false 释放 */
+  reserved: boolean;
+}
+
+export const reserveWorktree = (repoId: number, input: ReserveWorktreeInput) =>
+  fx<{ ok: boolean; status: string }>({
+    url: `/api/repos/${repoId}/worktrees/reserve`,
+    method: "POST",
+    body: input,
+  });

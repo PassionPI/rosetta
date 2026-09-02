@@ -7,6 +7,7 @@ import fs from "node:fs";
 import { isAuthed } from "./auth/cookie.ts";
 import { webDistDir } from "./config.ts";
 import { coreRoutes } from "./routes/core.ts";
+import { notificationRoutes } from "./routes/notifications.ts";
 import { orchestratorRoutes } from "./routes/orchestrator.ts";
 import { wsHub } from "./ws/hub.ts";
 
@@ -49,6 +50,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   await app.register(coreRoutes, { prefix: "/api" });
+  await app.register(notificationRoutes, { prefix: "/api" });
   await app.register(orchestratorRoutes, { prefix: "/api" });
 
   // 生产模式托管 web 产物（SPA fallback）

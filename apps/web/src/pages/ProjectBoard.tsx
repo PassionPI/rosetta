@@ -4,6 +4,7 @@ import {
   listRepos,
   refreshRepo,
   registerRepo,
+  reserveWorktree,
   setRepoModel,
 } from "@/api/repos.ts";
 import { cancelTask, createTask, listTasks, retryTask } from "@/api/tasks.ts";
@@ -57,6 +58,8 @@ function statusClass(status: string): string {
     case "failed":
     case "unavailable":
       return "border-destructive/60 text-destructive";
+    case "reserved":
+      return "border-violet-500/50 text-violet-400";
     default:
       return "border-border text-muted-foreground";
   }
@@ -166,6 +169,11 @@ function RepoPanel({ repo }: { repo: RepoDTO }) {
     mutationFn: () => refreshRepo(repo.id).unwrap(),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["repos"] }),
   });
+  const reserve = useMutation({
+    mutationFn: (input: { path: string; reserved: boolean }) =>
+      reserveWorktree(repo.id, input).unwrap(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["repos"] }),
+  });
   const setRepoModelMut = useMutation({
     mutationFn: (m: string) =>
       setRepoModel(repo.id, { model: m === "__default" ? "" : m }).unwrap(),
@@ -256,6 +264,34 @@ function RepoPanel({ repo }: { repo: RepoDTO }) {
                   </Link>
                 )}
               </div>
+              {/* 占用/释放（md 需求 #6）：reserved 不参与派发 */}
+              {w.status !== "busy" && (
+                <div className="mt-2">
+                  {w.status === "reserved" ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={reserve.isPending}
+                      onClick={() =>
+                        reserve.mutate({ path: w.path, reserved: false })
+                      }
+                    >
+                      释放占用
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={reserve.isPending}
+                      onClick={() =>
+                        reserve.mutate({ path: w.path, reserved: true })
+                      }
+                    >
+                      占用
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -357,7 +393,7 @@ function RepoPanel({ repo }: { repo: RepoDTO }) {
                   {t.deps.length ? t.deps.map((d) => `#${d}`).join(" ") : "—"}
                 </TableCell>
                 <TableCell>
-                  {(t.status === "running" || t.status === "queued") && (
+                  {t.status !== "done" && t.status !== "cancelled" && (
                     <Button
                       variant="outline"
                       size="sm"

@@ -203,15 +203,22 @@ export async function coreRoutes(app: FastifyInstance): Promise<void> {
       const { model: m, thinkingLevel } = await resolveModelSpec(model);
       await entry.session.setModel(m);
       if (thinkingLevel) entry.session.setThinkingLevel(thinkingLevel);
+      // 读回实际生效模型（setModel 可能被 pi clamp/拒绝），以实际值入库
+      const actual = entry.session.model;
       db.update(sessions)
         .set({
-          provider: m.provider,
-          modelId: m.id,
+          provider: actual?.provider ?? m.provider,
+          modelId: actual?.id ?? m.id,
           thinkingLevel: String(entry.session.thinkingLevel ?? ""),
         })
         .where(eq(sessions.id, id))
         .run();
-      return { ok: true, provider: m.provider, modelId: m.id, thinkingLevel: entry.session.thinkingLevel };
+      return {
+        ok: true,
+        provider: actual?.provider ?? m.provider,
+        modelId: actual?.id ?? m.id,
+        thinkingLevel: entry.session.thinkingLevel,
+      };
     } catch (e) {
       return reply.code(400).send({ error: e instanceof Error ? e.message : String(e) });
     }

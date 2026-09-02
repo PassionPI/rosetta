@@ -1,5 +1,5 @@
 // WS 信封类型（md/04-api.md §4）
-import type { TaskDTO } from "./dto.ts";
+import type { NotificationDTO, TaskDTO } from "./dto.ts";
 
 /** pi 原生事件透传信封 */
 export interface EventEnvelope {
@@ -24,6 +24,20 @@ export interface TaskUpdateEnvelope {
   note?: string;
 }
 
+/** 验收 git 流水线进度（生成 commit message → commit → push） */
+export interface TaskProgressEnvelope {
+  kind: "task_progress";
+  taskId: number;
+  stage: "generating_commit_message" | "committing" | "pushing" | "done" | "failed";
+  detail?: string;
+}
+
+/** 通知中心新通知 */
+export interface NotificationEnvelope {
+  kind: "notification";
+  notification: NotificationDTO;
+}
+
 export interface BacklogEnvelope {
   kind: "backlog";
   sessionId: string;
@@ -35,6 +49,8 @@ export type WsServerMessage =
   | EventEnvelope
   | RunStatusEnvelope
   | TaskUpdateEnvelope
+  | TaskProgressEnvelope
+  | NotificationEnvelope
   | BacklogEnvelope;
 
 export type WsClientMessage =

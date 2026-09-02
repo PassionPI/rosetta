@@ -1,6 +1,12 @@
 import {
+  listNotifications,
+  type ListNotificationsInput,
+} from "@/api/notifications.ts";
+import { listRepos } from "@/api/repos.ts";
+import {
   acceptTask,
   completeTask,
+  dispatchTask,
   getTask,
   nudgeTask,
   rejectTask,
@@ -8,22 +14,52 @@ import {
 import Markdown from "@/components/Markdown.tsx";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { defineActionHandler, useAction } from "@/hooks/useAction";
-import type { TaskDTO } from "@rosetta/shared";
+import { wsClient } from "@/ws/client.ts";
+import type { TaskDTO, WsServerMessage } from "@rosetta/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Check, CircleCheckBig, Send, Undo2 } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  CheckCheck,
+  CircleCheckBig,
+  Send,
+  Undo2,
+} from "lucide-react";
+import { useEffect } from "react";
 import SessionView from "./SessionView.tsx";
 
 interface ReviewState {
   feedback: string;
+  /** 验收 git 流水线进度（WS task_progress） */
+  stage: string;
+  stageDetail: string;
+  forceWt: string;
 }
 
 interface ReviewActions {
   editFeedback: string;
-  rejected: null;
+  progress: { stage: string; detail?: string };
+  resetProgress: null;
+  pickForceWt: string;
 }
+
+const STAGE_LABEL: Record<string, string> = {
+  generating_commit_message: "AI 生成 commit message…",
+  committing: "提交中…",
+  pushing: "推送中…",
+  done: "完成",
+  failed: "失败",
+};
 
 /**
  * 任务页：左右布局。
@@ -33,31 +69,80 @@ export default function TaskReview({ taskId }: { taskId: number }) {
   const queryClient = useQueryClient();
 
   const [state, actions] = useAction(
-    (): ReviewState => ({ feedback: "" }),
+    (): ReviewState => ({
+      feedback: "",
+      stage: "",
+      stageDetail: "",
+      forceWt: "",
+    }),
     defineActionHandler<ReviewState, ReviewActions>({
       editFeedback: (s, v) => {
         s.feedback = v;
       },
-      rejected: (s) => {
-        s.feedback = "";
+      progress: (s, p) => {
+        s.stage = p.stage;
+        s.stageDetail = p.detail ?? "";
+      },
+      resetProgress: (s) => {
+        s.stage = "";
+        s.stageDetail = "";
+      },
+      pickForceWt: (s, v) => {
+        s.forceWt = v;
       },
     }),
   );
+
+  // 验收流水线进度（md 需求 #5）
+  useEffect(() => {
+    const off = wsClient.on((msg: WsServerMessage) => {
+      if (msg.kind === "task_progress" && msg.taskId === taskId) {
+        actions.progress({ stage: msg.stage, detail: msg.detail });
+      }
+    });
+    return off;
+  }, [taskId, actions]);
 
   const task = useQuery({
     queryKey: ["task", taskId],
     queryFn: () => getTask(taskId).unwrap(),
   });
+  const t: TaskDTO | undefined = task.data;
+
+  // 派发受阻检测（md 需求 #7）：queued + 未读 dispatch_blocked 通知 → 提供强制派发
+  const blocked = useQuery({
+    queryKey: ["notifications", "task-blocked", taskId],
+    queryFn: () =>
+      listNotifications({
+        taskId,
+        unreadOnly: true,
+      } satisfies ListNotificationsInput).unwrap(),
+    enabled: t?.status === "queued",
+    refetchInterval: 15_000,
+  });
+  const isBlocked =
+    t?.status === "queued" &&
+    (blocked.data ?? []).some((n) => n.type === "dispatch_blocked");
+  const repos = useQuery({
+    queryKey: ["repos"],
+    queryFn: () => listRepos().unwrap(),
+    enabled: isBlocked,
+  });
+  const repoWorktrees =
+    (repos.data ?? []).find((r) => r.id === t?.repoId)?.worktrees ?? [];
 
   const accept = useMutation({
-    mutationFn: () => acceptTask(taskId).unwrap(),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["task", taskId] }),
+    mutationFn: (input: { commit: boolean }) =>
+      acceptTask(taskId, input).unwrap(),
+    onSuccess: () => {
+      actions.resetProgress();
+      void queryClient.invalidateQueries({ queryKey: ["task", taskId] });
+    },
   });
   const reject = useMutation({
     mutationFn: () => rejectTask(taskId, { feedback: state.feedback }).unwrap(),
     onSuccess: () => {
-      actions.rejected();
+      actions.editFeedback("");
       void queryClient.invalidateQueries({ queryKey: ["task", taskId] });
     },
   });
@@ -71,8 +156,15 @@ export default function TaskReview({ taskId }: { taskId: number }) {
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["task", taskId] }),
   });
-
-  const t: TaskDTO | undefined = task.data;
+  const forceDispatch = useMutation({
+    mutationFn: () =>
+      dispatchTask(taskId, { worktreePath: state.forceWt }).unwrap(),
+    onSuccess: () => {
+      actions.pickForceWt("");
+      void queryClient.invalidateQueries({ queryKey: ["task", taskId] });
+      void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+    },
+  });
 
   if (task.isLoading)
     return <p className="p-6 text-sm text-muted-foreground">加载中…</p>;
@@ -168,23 +260,48 @@ export default function TaskReview({ taskId }: { taskId: number }) {
           </p>
         )}
 
+        {/* 验收流水线进度（md 需求 #5） */}
+        {(state.stage || t.status === "finishing") && (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-2.5 text-sm">
+            <p
+              className={
+                state.stage === "failed" ? "text-destructive" : "text-amber-400"
+              }
+            >
+              {STAGE_LABEL[state.stage] ?? "git 流水线执行中…"}
+            </p>
+            {state.stageDetail && (
+              <p className="mt-1 line-clamp-2 font-mono text-xs text-muted-foreground">
+                {state.stageDetail}
+              </p>
+            )}
+          </div>
+        )}
+
         {t.status === "awaiting_review" && (
           <div className="flex flex-col gap-3 border-t pt-4">
             <p className="text-xs text-muted-foreground">
-              commit message 将由 AI 根据需求与改动总结生成。
+              commit message 将由 AI 根据需求与改动总结生成，进度实时显示。
             </p>
-            <div>
+            <div className="flex flex-col gap-2">
               <Button
                 disabled={accept.isPending}
-                onClick={() => accept.mutate()}
+                onClick={() => accept.mutate({ commit: true })}
               >
                 <Check className="size-4" />
                 {accept.isPending
-                  ? "AI 总结并提交中…"
+                  ? (STAGE_LABEL[state.stage] ?? "执行中…")
                   : "验收通过（AI commit + push）"}
               </Button>
+              <Button
+                variant="outline"
+                disabled={accept.isPending}
+                onClick={() => accept.mutate({ commit: false })}
+              >
+                <CheckCheck className="size-4" /> 仅验收通过（不 commit）
+              </Button>
               {accept.isError && (
-                <p className="mt-1 text-sm text-destructive">
+                <p className="text-sm text-destructive">
                   {String(accept.error)}
                 </p>
               )}
@@ -233,6 +350,53 @@ export default function TaskReview({ taskId }: { taskId: number }) {
             </Button>
             {nudge.isSuccess && (
               <span className="text-xs text-muted-foreground">催促已发送</span>
+            )}
+          </div>
+        )}
+
+        {/* 派发受阻：强制指定 worktree（md 需求 #7） */}
+        {isBlocked && (
+          <div className="flex flex-col gap-2 rounded-lg border border-amber-500/50 bg-amber-500/5 p-3">
+            <p className="flex items-center gap-1.5 text-sm text-amber-400">
+              <AlertTriangle className="size-4" /> 派发受阻：空闲 worktree
+              均有未提交改动
+            </p>
+            <Select
+              value={state.forceWt || "__pick"}
+              onValueChange={actions.pickForceWt}
+            >
+              <SelectTrigger size="sm" className="w-full">
+                <SelectValue placeholder="选择 worktree" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__pick" disabled>
+                  选择 worktree
+                </SelectItem>
+                {repoWorktrees
+                  .filter((w) => w.status !== "busy")
+                  .map((w) => (
+                    <SelectItem key={w.path} value={w.path}>
+                      slot {w.slotOrder} · {w.name}
+                      {w.status !== "idle" ? `（${w.status}）` : ""}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+            <Button
+              size="sm"
+              disabled={
+                !state.forceWt ||
+                state.forceWt === "__pick" ||
+                forceDispatch.isPending
+              }
+              onClick={() => forceDispatch.mutate()}
+            >
+              强制派发（忽略未提交改动）
+            </Button>
+            {forceDispatch.isError && (
+              <p className="text-xs text-destructive">
+                {String(forceDispatch.error)}
+              </p>
             )}
           </div>
         )}

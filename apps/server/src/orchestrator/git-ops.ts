@@ -34,23 +34,27 @@ export async function commitAndPush(
   wt: string,
   message: string,
 ): Promise<{ endCommit: string; pushError: string | null; committed: boolean }> {
-  await git(["add", "-A"], wt);
-  const dirty = await worktreeIsDirty(wt);
-  let committed = false;
-  if (dirty) {
-    await git(["commit", "-m", message], wt);
-    committed = true;
-  }
+  const committed = await stageAndCommit(wt, message);
   const endCommit = await headCommit(wt);
-  let pushError: string | null = null;
-  if (await hasRemote(wt)) {
-    try {
-      await git(["push", "origin", "HEAD"], wt);
-    } catch (e) {
-      pushError = e instanceof Error ? e.message : String(e);
-    }
-  } else {
-    pushError = "无 origin 远端，仅本地提交";
-  }
+  const pushError = await pushCurrent(wt);
   return { endCommit, pushError, committed };
+}
+
+/** stage 全部改动并 commit；无改动则跳过。返回是否产生了提交 */
+export async function stageAndCommit(wt: string, message: string): Promise<boolean> {
+  await git(["add", "-A"], wt);
+  if (!(await worktreeIsDirty(wt))) return false;
+  await git(["commit", "-m", message], wt);
+  return true;
+}
+
+/** push 当前分支；返回错误信息（无远端/失败），成功为 null */
+export async function pushCurrent(wt: string): Promise<string | null> {
+  if (!(await hasRemote(wt))) return "无 origin 远端，仅本地提交";
+  try {
+    await git(["push", "origin", "HEAD"], wt);
+    return null;
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
 }

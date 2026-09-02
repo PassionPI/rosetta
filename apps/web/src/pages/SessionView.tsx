@@ -242,8 +242,7 @@ export default function SessionView({
       off();
       if (refetchTimer) clearTimeout(refetchTimer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- actions 来自 useAction，引用稳定
-  }, [sessionId, queryClient]);
+  }, [sessionId, queryClient, actions]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });

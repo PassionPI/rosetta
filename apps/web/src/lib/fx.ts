@@ -47,7 +47,7 @@ type Result<R, Options extends object = object> = Promise<
     ]
 >;
 
-export type ResultWithAbort<R, Options extends object = object> = Result<
+type ResultWithAbort<R, Options extends object = object> = Result<
   R,
   Options
 > & {
@@ -261,3 +261,5 @@ export const createFetch = <Options extends object = object>(
     return responding;
   };
 };
+
+export type { Middleware, ResultWithAbort };

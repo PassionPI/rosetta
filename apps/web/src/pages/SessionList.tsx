@@ -72,7 +72,6 @@ export default function SessionList() {
   const sessions = useQuery({
     queryKey: ["sessions", state.cwd],
     queryFn: () => listSessions(state.cwd ?? undefined).unwrap(),
-    refetchInterval: 10_000,
   });
 
   const create = useMutation({

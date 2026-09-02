@@ -5,22 +5,30 @@ import { tasks, worktrees } from "../db/schema.ts";
 import { log } from "../util/log.ts";
 import { registry } from "../agent/registry.ts";
 import { recorder } from "../recorder/event-recorder.ts";
-import { commitAndPush, withRepoLock } from "./git-ops.ts";
-import { getTaskRow } from "./queries.ts";
-import { getRepoDefaultModel } from "./queries.ts";
+import { notify, notifyOnce } from "../notify/notify.ts";
+import { wsHub } from "../ws/hub.ts";
+import { headCommit, pushCurrent, stageAndCommit, withRepoLock } from "./git-ops.ts";
+import { getTaskRow, getRepoDefaultModel } from "./queries.ts";
 import { emitTask } from "./review-tool.ts";
 import { generateCommitMessageSafe } from "./commit-message.ts";
 
-/** watch：run 结束但未 submit → 保持 running + 提示（md/08 §4） */
+/** watch：run 结束但未 submit → 保持 running + 通知（md/08 §4） */
 export function watchTaskRun(taskId: number, session: AgentSession): void {
   session.subscribe((ev) => {
     if (ev.type !== "agent_end" || ev.willRetry) return;
-    // submit_for_review 的 execute 写库先于 agent_end 事件；再等一拍确认，
-    // 避免「已提交验收」被误报为「未提交」
+    // submit_for_review 的 execute 写库先于 agent_end 事件；再等一拍确认
     setTimeout(() => {
       const row = getTaskRow(taskId);
       if (row?.status === "running") {
         emitTask(taskId, "run 已结束但未调用 submit_for_review（可催促/人工标记完成，或继续对话后验收）");
+        notifyOnce({
+          type: "run_stopped",
+          title: `任务 #${taskId} 已停止但未提交验收`,
+          detail: "可催促、人工标记完成，或在会话里继续对话",
+          taskId,
+          repoId: row.repoId,
+          sessionId: row.sessionId ?? undefined,
+        });
       }
     }, 200);
   });
@@ -78,38 +86,99 @@ export async function completeTask(taskId: number): Promise<void> {
     .where(eq(tasks.id, taskId))
     .run();
   emitTask(taskId, "人工标记完成，待验收");
+  notify({
+    type: "awaiting_review",
+    title: `任务 #${taskId} 待验收（人工标记）`,
+    taskId,
+    repoId: row.repoId,
+    sessionId: row.sessionId ?? undefined,
+  });
+}
+
+export interface AcceptOptions {
+  /** 默认 true：AI 生成 commit message → commit → push；false 仅标记通过，不动工作区 */
+  commit?: boolean;
 }
 
 /**
- * 验收：commit message 由 AI 总结生成（不使用用户输入，md 需求 #5）→
- * commit + push 当前分支 → done → 释放 slot → dispatch
+ * 验收（md 需求 #3/#5）：
+ * - commit 模式：AI 生成 message（进度可见）→ commit → push 当前分支 → done
+ * - 仅通过模式：不改工作区直接 done，提示手动处理
  */
-export async function acceptTask(taskId: number): Promise<void> {
+export async function acceptTask(taskId: number, opts: AcceptOptions = {}): Promise<void> {
+  const doCommit = opts.commit !== false;
   const row = getTaskRow(taskId);
   if (!row || row.status !== "awaiting_review" || !row.worktreePath) throw new Error("任务不在待验收状态");
 
   db.update(tasks).set({ status: "finishing" }).where(eq(tasks.id, taskId)).run();
-  emitTask(taskId, "AI 生成 commit message 中");
+  emitTask(taskId, doCommit ? "git 流水线执行中" : "标记通过");
   try {
     const wt = row.worktreePath;
-    const modelSpec = getRepoDefaultModel(row.repoId);
-    const msg = await generateCommitMessageSafe(wt, taskId, row.description, row.summary, modelSpec);
-    log.info(`[task] #${taskId} commit message: ${msg.split("\n")[0]}`);
-    const { endCommit, pushError } = await withRepoLock(row.repoId, () => commitAndPush(wt, msg));
-    db.update(tasks)
-      .set({ status: "done", endCommit, finishedAt: Date.now(), error: pushError })
-      .where(eq(tasks.id, taskId))
+
+    if (doCommit) {
+      wsHub.taskProgress(taskId, "generating_commit_message");
+      const modelSpec = getRepoDefaultModel(row.repoId);
+      const msg = await generateCommitMessageSafe(wt, taskId, row.description, row.summary, modelSpec);
+      log.info(`[task] #${taskId} commit message: ${msg.split("\n")[0]}`);
+
+      wsHub.taskProgress(taskId, "committing", msg.split("\n")[0]);
+      await withRepoLock(row.repoId, () => stageAndCommit(wt, msg));
+      const endCommit = await headCommit(wt);
+
+      wsHub.taskProgress(taskId, "pushing");
+      const pushError = await withRepoLock(row.repoId, () => pushCurrent(wt));
+      wsHub.taskProgress(taskId, "done");
+
+      db.update(tasks)
+        .set({ status: "done", endCommit, finishedAt: Date.now(), error: pushError })
+        .where(eq(tasks.id, taskId))
+        .run();
+      notify({
+        type: "task_done",
+        title: `任务 #${taskId} 已完成${pushError ? "（push 警告）" : ""}`,
+        detail: pushError ?? `commit: ${msg.split("\n")[0]}`,
+        taskId,
+        repoId: row.repoId,
+        sessionId: row.sessionId ?? undefined,
+      });
+    } else {
+      db.update(tasks)
+        .set({ status: "done", finishedAt: Date.now(), error: "仅验收通过（未提交），请手动处理工作区改动" })
+        .where(eq(tasks.id, taskId))
+        .run();
+      notify({
+        type: "task_done",
+        title: `任务 #${taskId} 已验收通过（未提交）`,
+        detail: "工作区改动保留，未 commit/push",
+        taskId,
+        repoId: row.repoId,
+        sessionId: row.sessionId ?? undefined,
+      });
+    }
+
+    // 释放 slot（仅 busy 时，避免覆盖用户 reserved 占用）
+    db.update(worktrees)
+      .set({ status: "idle", updatedAt: Date.now() })
+      .where(eq(worktrees.path, wt))
       .run();
-    db.update(worktrees).set({ status: "idle", updatedAt: Date.now() }).where(eq(worktrees.path, wt)).run();
-    emitTask(taskId, pushError ? `完成（警告：${pushError}）` : "已完成并推送");
+    emitTask(taskId, "已完成");
   } catch (e) {
     const err = e instanceof Error ? e.message : String(e);
     log.error(`[task] #${taskId} git 流水线失败:`, err);
+    wsHub.taskProgress(taskId, "failed", err);
     db.update(tasks).set({ status: "failed", error: err }).where(eq(tasks.id, taskId)).run();
+    notify({
+      type: "task_failed",
+      title: `任务 #${taskId} 验收失败`,
+      detail: err.slice(0, 300),
+      taskId,
+      repoId: row.repoId,
+      sessionId: row.sessionId ?? undefined,
+    });
     emitTask(taskId, `git 流水线失败：${err}`);
     throw e;
   } finally {
-    const { dispatch } = await import("./scheduler.ts"); // 运行时引入避免循环依赖
+    const { dispatch } = await import("./scheduler.ts");
     dispatch(row.repoId).catch((err) => log.error("[scheduler] dispatch 失败:", err));
   }
 }
